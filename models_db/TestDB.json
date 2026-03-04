@@ -1,0 +1,188 @@
+{
+  "armies": [
+    "Cygnar",
+    "Storm Knights",
+    "Khador",
+    "5th Division"
+  ],
+  "keywords": [
+    "Blighted",
+    "Mercenary",
+    "Nyss",
+    "Ogrun",
+    "Storm Knight",
+    "Winter Guard"
+  ],
+  "models": [
+    {
+      "name": "Winter Guard Infantry Grunt",
+      "short_name": "Grunt",
+      "vocal_names": [
+        "when the garden fan tree grant",
+        "when or guard and venturing grant",
+        "winner guard infantry grant",
+        "winter guard infantry grant",
+        "winter guard fan treat grunt"
+      ],
+      "faction": "Khador",
+      "basic_type": "Trooper",
+      "base_size": 30,
+      "cost": 0,
+      "model_statistics": {
+        "spd": 6,
+        "aat": -1,
+        "mat": 4,
+        "rat": 5,
+        "def": 12,
+        "arm": 13,
+        "arc": -1,
+        "fury": -1,
+        "ctrl": -1,
+        "thr": -1
+      },
+      "damage_system_type": "box",
+      "damage_system": {
+        "boxes": 1
+      },
+      "is_character": false,
+      "fa": -1,
+      "armies": [
+        "Khador",
+        "5th Division"
+      ],
+      "keywords": [
+        "Winter Guard"
+      ],
+      "advantages": [
+        "Combined Melee Attack"
+      ],
+      "model_resistances": [],
+      "feat": "",
+      "special_actions": [],
+      "special_attacks": [],
+      "spells": [],
+      "special_rules": [],
+      "melee_weapons": [
+        {
+          "weapon_type": "melee",
+          "name": "Axe",
+          "location": "Any",
+          "range": 1,
+          "power": 8,
+          "two_x": false,
+          "weapon_qualities": [],
+          "continuous_effects": [],
+          "critical_effects": [],
+          "damage_types": []
+        }
+      ],
+      "range_weapons": [
+        {
+          "weapon_type": "range",
+          "name": "Blunderbuss",
+          "location": "Any",
+          "range": 8,
+          "power": 12,
+          "two_x": false,
+          "rof_dice": 0,
+          "rof_flat": 1,
+          "range_weapon_type": "Shot",
+          "area_of_effect": 0,
+          "blast_power": 0,
+          "weapon_qualities": [
+            "Pistol"
+          ],
+          "continuous_effects": [],
+          "critical_effects": [],
+          "damage_types": []
+        }
+      ],
+      "available_hardpoints": []
+    },
+    {
+      "name": "Stormblade Infantry Grunt",
+      "short_name": "Grunt",
+      "vocal_names": [
+        "storm blaydon in friend tree grant",
+        "storm blade infantry grant",
+        "storm blade infantry ground"
+      ],
+      "faction": "Cygnar",
+      "basic_type": "Trooper",
+      "base_size": 30,
+      "cost": 0,
+      "model_statistics": {
+        "spd": 5,
+        "aat": 6,
+        "mat": 6,
+        "rat": 5,
+        "def": 12,
+        "arm": 16,
+        "arc": -1,
+        "fury": -1,
+        "ctrl": -1,
+        "thr": -1
+      },
+      "damage_system_type": "box",
+      "damage_system": {
+        "boxes": 1
+      },
+      "is_character": false,
+      "fa": -1,
+      "armies": [
+        "Cygnar",
+        "Storm Knights"
+      ],
+      "keywords": [
+        "Storm Knight"
+      ],
+      "advantages": [],
+      "model_resistances": [
+        "Electricity"
+      ],
+      "feat": "",
+      "special_actions": [],
+      "special_attacks": [],
+      "spells": [],
+      "special_rules": [],
+      "melee_weapons": [
+        {
+          "weapon_type": "melee",
+          "name": "Storm Glaive",
+          "location": "Any",
+          "range": 1,
+          "power": 13,
+          "two_x": false,
+          "weapon_qualities": [],
+          "continuous_effects": [],
+          "critical_effects": [],
+          "damage_types": []
+        }
+      ],
+      "range_weapons": [
+        {
+          "weapon_type": "range",
+          "name": "Glaive Bolt",
+          "location": "Any",
+          "range": 6,
+          "power": 13,
+          "two_x": false,
+          "rof_dice": 0,
+          "rof_flat": 1,
+          "range_weapon_type": "Shot",
+          "area_of_effect": 0,
+          "blast_power": 0,
+          "weapon_qualities": [
+            "Pistol"
+          ],
+          "continuous_effects": [],
+          "critical_effects": [],
+          "damage_types": [
+            "Electricity"
+          ]
+        }
+      ],
+      "available_hardpoints": []
+    }
+  ]
+}

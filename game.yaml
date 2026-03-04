@@ -1,0 +1,19 @@
+# Warmachine Game Configuration
+
+# Game metadata
+name: "Warmachine"
+version: "1.0.0"
+author: "TTGA Team"
+description: "A TTGA port for the fast-paced tabletop miniatures wargame Warmachine by Steamforged Games"
+
+# Zone requirements
+zones:
+  - internal_name: "play_area"
+    display_name: "Play Area"
+    requires_camera: true
+    requires_projector: true
+    units: "in"
+    description: "Main play area for Warmachine matches"
+
+# Game settings
+settings: {}
