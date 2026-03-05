@@ -1,12 +1,14 @@
 {
   "armies": [
+    "5th Division",
     "Cygnar",
-    "Storm Knights",
+    "Infernals",
     "Khador",
-    "5th Division"
+    "Storm Knights"
   ],
   "keywords": [
     "Blighted",
+    "Cultist",
     "Mercenary",
     "Nyss",
     "Ogrun",
@@ -16,7 +18,7 @@
   "models": [
     {
       "name": "Winter Guard Infantry Grunt",
-      "short_name": "Grunt",
+      "short_name": "",
       "vocal_names": [
         "when the garden fan tree grant",
         "when or guard and venturing grant",
@@ -101,7 +103,7 @@
     },
     {
       "name": "Stormblade Infantry Grunt",
-      "short_name": "Grunt",
+      "short_name": "",
       "vocal_names": [
         "storm blaydon in friend tree grant",
         "storm blade infantry grant",
@@ -183,6 +185,89 @@
         }
       ],
       "available_hardpoints": []
+    },
+    {
+      "name": "Dark Sentinels Grunt",
+      "short_name": "",
+      "vocal_names": [
+        "dark center knows grunt",
+        "dark sentinels grant",
+        "dark sentinels grand"
+      ],
+      "faction": "Infernals",
+      "basic_type": "Trooper",
+      "base_size": 30,
+      "cost": 0,
+      "model_statistics": {
+        "spd": 6,
+        "aat": 6,
+        "mat": 5,
+        "rat": -1,
+        "def": 12,
+        "arm": 15,
+        "arc": -1,
+        "fury": -1,
+        "ctrl": -1,
+        "thr": -1
+      },
+      "damage_system_type": "box",
+      "damage_system": {
+        "boxes": 5
+      },
+      "is_character": false,
+      "fa": -1,
+      "armies": [
+        "Infernals"
+      ],
+      "keywords": [
+        "Cultist"
+      ],
+      "advantages": [],
+      "model_resistances": [],
+      "feat": "",
+      "special_actions": [],
+      "special_attacks": [],
+      "spells": [],
+      "special_rules": [],
+      "melee_weapons": [
+        {
+          "weapon_type": "melee",
+          "name": "Great Sword",
+          "location": "Any",
+          "range": 2,
+          "power": 13,
+          "two_x": false,
+          "weapon_qualities": [],
+          "continuous_effects": [],
+          "critical_effects": [],
+          "damage_types": [
+            "Magical"
+          ]
+        }
+      ],
+      "range_weapons": [],
+      "available_hardpoints": []
+    },
+    {
+      "name": "Winter Guard Infantry",
+      "vocal_names": [
+        "winter guard infantry unit"
+      ],
+      "faction": "Khador",
+      "basic_type": "Unit",
+      "cost": 4,
+      "fa": 4,
+      "armies": [
+        "5th Division",
+        "Khador"
+      ],
+      "keywords": [],
+      "troopers": [
+        {
+          "model_name": "Winter Guard Infantry Grunt",
+          "quantity": 5
+        }
+      ]
     }
   ]
 }

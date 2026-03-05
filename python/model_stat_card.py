@@ -84,6 +84,13 @@ class BasicType(str, Enum):
     TROOPER = "Trooper"
     COMMAND_ATTACHMENT = "Command Attachment"
     WEAPON_ATTACHMENT = "Weapon Attachment"
+    UNIT = "Unit"
+    COMMAND_ATTACHMENT_UNIT = "Command Attachment Unit"
+
+
+_UNIT_TYPES: frozenset[BasicType] = frozenset(
+    {BasicType.UNIT, BasicType.COMMAND_ATTACHMENT_UNIT}
+)
 
 
 class Army(str, Enum):
@@ -158,6 +165,24 @@ class ModelResistance(str, Enum):
     CORROSION = "Corrosion"
     ELECTRICITY = "Electricity"
     FIRE = "Fire"
+
+
+@dataclass
+class TrooperEntry:
+    """A model and its quantity within a unit."""
+
+    model_name: str
+    quantity: int = 1
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"model_name": self.model_name, "quantity": self.quantity}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> TrooperEntry:
+        return cls(
+            model_name=str(data["model_name"]),
+            quantity=int(data.get("quantity", 1)),
+        )
 
 
 @dataclass
@@ -297,12 +322,12 @@ class ModelStatCard:
     """
 
     name: str
-    short_name: str
     vocal_names: list[str]
     faction: Faction
     basic_type: BasicType
     base_size: int
     cost: int
+    short_name: str = ""
     model_statistics: ModelStatistics = field(default_factory=ModelStatistics)
     damage_system_type: DamageSystemType = DamageSystemType.BOX
     damage_system: AnyDamageSystem = field(default_factory=BoxDamageSystem)
@@ -320,6 +345,7 @@ class ModelStatCard:
     melee_weapons: list[MeleeWeapon] = field(default_factory=list)
     range_weapons: list[RangeWeapon] = field(default_factory=list)
     available_hardpoints: list[list[Hardpoint]] = field(default_factory=list)
+    troopers: list[TrooperEntry] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         """Validate field values after initialisation.
@@ -327,7 +353,7 @@ class ModelStatCard:
         Raises:
             ValueError: If any field contains an invalid value.
         """
-        if self.base_size not in BASE_SIZES:
+        if self.basic_type not in _UNIT_TYPES and self.base_size not in BASE_SIZES:
             raise ValueError(
                 f"base_size must be one of {BASE_SIZES}, got {self.base_size}"
             )
@@ -343,9 +369,24 @@ class ModelStatCard:
             Dictionary representation suitable for direct use with
             :func:`json.dumps`.
         """
+        if self.basic_type in _UNIT_TYPES:
+            result: dict[str, Any] = {
+                "name": self.name,
+                "vocal_names": list(self.vocal_names),
+                "faction": self.faction.value,
+                "basic_type": self.basic_type.value,
+                "cost": self.cost,
+                "fa": self.fa,
+                "armies": list(self.armies),
+                "keywords": list(self.keywords),
+                "troopers": [t.to_dict() for t in self.troopers],
+            }
+            if self.short_name:
+                result["short_name"] = self.short_name
+            return result
         return {
             "name": self.name,
-            "short_name": self.short_name,
+            "short_name": self.short_name if self.is_character else "",
             "vocal_names": list(self.vocal_names),
             "faction": self.faction.value,
             "basic_type": self.basic_type.value,
@@ -387,11 +428,11 @@ class ModelStatCard:
         """
         return cls(
             name=data["name"],
-            short_name=data["short_name"],
             vocal_names=list(data["vocal_names"]),
+            short_name=str(data.get("short_name", "")),
             faction=Faction(data["faction"]),
             basic_type=BasicType(data["basic_type"]),
-            base_size=int(data["base_size"]),
+            base_size=int(data.get("base_size", BASE_SIZES[0])),
             cost=int(data["cost"]),
             model_statistics=ModelStatistics.from_dict(data.get("model_statistics", {})),
             damage_system_type=DamageSystemType(data.get("damage_system_type", DamageSystemType.BOX.value)),
@@ -419,5 +460,8 @@ class ModelStatCard:
             available_hardpoints=[
                 [Hardpoint.from_dict(h) for h in group]
                 for group in data.get("available_hardpoints", [])
+            ],
+            troopers=[
+                TrooperEntry.from_dict(t) for t in data.get("troopers", [])
             ],
         )

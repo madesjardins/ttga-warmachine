@@ -43,6 +43,8 @@ from .model_stat_card import (
     ModelResistance,
     ModelStatCard,
     ModelStatistics,
+    TrooperEntry,
+    _UNIT_TYPES,
 )
 from .weapon import (
     ContinuousEffect,
@@ -802,6 +804,139 @@ class DamageGridEditorDialog(QtWidgets.QDialog):
 
 
 # ---------------------------------------------------------------------------
+# TrooperInputWidget
+# ---------------------------------------------------------------------------
+
+
+class TrooperInputWidget(QtWidgets.QWidget):
+    """Widget for building a list of (model, quantity) trooper entries.
+
+    Provides a search box with autocomplete against known model names, an Add
+    button, and a scrollable list of rows where each row shows the model name,
+    a quantity spin-box and a remove button.
+    """
+
+    def __init__(self, parent: Optional[QtWidgets.QWidget] = None) -> None:
+        super().__init__(parent)
+        self._entries: list[TrooperEntry] = []
+        self._model_names: list[str] = []
+        self._row_widgets: list[QtWidgets.QWidget] = []
+        self._setup_ui()
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def set_model_names(self, names: list[str]) -> None:
+        self._model_names = sorted(names)
+        completer = QtWidgets.QCompleter(self._model_names, self)
+        completer.setCaseSensitivity(Qt.CaseInsensitive)
+        completer.setFilterMode(Qt.MatchContains)
+        self._search.setCompleter(completer)
+
+    def set_entries(self, entries: list[TrooperEntry]) -> None:
+        self.clear()
+        for e in entries:
+            self._add_row(e.model_name, e.quantity)
+
+    def get_entries(self) -> list[TrooperEntry]:
+        return list(self._entries)
+
+    def clear(self) -> None:
+        self._entries.clear()
+        for w in self._row_widgets:
+            w.deleteLater()
+        self._row_widgets.clear()
+
+    # ------------------------------------------------------------------
+    # UI setup
+    # ------------------------------------------------------------------
+
+    def _setup_ui(self) -> None:
+        v = QtWidgets.QVBoxLayout(self)
+        v.setContentsMargins(0, 0, 0, 0)
+
+        add_row = QtWidgets.QHBoxLayout()
+        self._search = QtWidgets.QLineEdit()
+        self._search.setPlaceholderText("Type model name to add…")
+        self._search.returnPressed.connect(self._on_add)
+        add_btn = QtWidgets.QPushButton("Add")
+        add_btn.clicked.connect(self._on_add)
+        add_row.addWidget(self._search)
+        add_row.addWidget(add_btn)
+        v.addLayout(add_row)
+
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QtWidgets.QFrame.StyledPanel)
+        scroll.setMinimumHeight(140)
+        self._rows_container = QtWidgets.QWidget()
+        self._rows_layout = QtWidgets.QVBoxLayout(self._rows_container)
+        self._rows_layout.setContentsMargins(4, 4, 4, 4)
+        self._rows_layout.setSpacing(4)
+        self._rows_layout.addStretch()
+        scroll.setWidget(self._rows_container)
+        v.addWidget(scroll)
+
+    # ------------------------------------------------------------------
+    # Internals
+    # ------------------------------------------------------------------
+
+    @QtCore.Slot()
+    def _on_add(self) -> None:
+        name = self._search.text().strip()
+        if not name:
+            return
+        if self._model_names and name not in self._model_names:
+            return
+        for e in self._entries:
+            if e.model_name == name:
+                return
+        self._add_row(name, 1)
+        self._search.clear()
+
+    def _add_row(self, model_name: str, qty: int) -> None:
+        entry = TrooperEntry(model_name=model_name, quantity=qty)
+        self._entries.append(entry)
+
+        row_w = QtWidgets.QWidget()
+        row_h = QtWidgets.QHBoxLayout(row_w)
+        row_h.setContentsMargins(2, 2, 2, 2)
+
+        name_lbl = QtWidgets.QLabel(model_name)
+        name_lbl.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred
+        )
+
+        qty_spin = QtWidgets.QSpinBox()
+        qty_spin.setRange(1, 99)
+        qty_spin.setValue(qty)
+        qty_spin.setFixedWidth(55)
+        qty_spin.valueChanged.connect(lambda v, e=entry: setattr(e, "quantity", v))
+
+        remove_btn = QtWidgets.QToolButton()
+        remove_btn.setText("×")
+        remove_btn.setFixedSize(22, 22)
+        remove_btn.clicked.connect(
+            lambda _, e=entry, w=row_w: self._remove_row(e, w)
+        )
+
+        row_h.addWidget(name_lbl)
+        row_h.addWidget(qty_spin)
+        row_h.addWidget(remove_btn)
+
+        self._rows_layout.insertWidget(self._rows_layout.count() - 1, row_w)
+        self._row_widgets.append(row_w)
+
+    def _remove_row(self, entry: TrooperEntry, widget: QtWidgets.QWidget) -> None:
+        if entry in self._entries:
+            self._entries.remove(entry)
+        if widget in self._row_widgets:
+            self._row_widgets.remove(widget)
+        widget.deleteLater()
+
+
+# ---------------------------------------------------------------------------
 # ModelEditorDialog
 # ---------------------------------------------------------------------------
 
@@ -859,9 +994,14 @@ class ModelEditorDialog(QtWidgets.QDialog):
         root = QtWidgets.QVBoxLayout(self)
 
         root.addWidget(self._create_top_section())
-        root.addWidget(self._create_assoc_section())
-        root.addWidget(self._create_stats_section())
-        root.addWidget(self._create_tabs())
+        self._assoc_section_widget = self._create_assoc_section()
+        root.addWidget(self._assoc_section_widget)
+        self._stats_section_widget = self._create_stats_section()
+        root.addWidget(self._stats_section_widget)
+        self._tabs_widget = self._create_tabs()
+        root.addWidget(self._tabs_widget)
+        self._troopers_section_widget = self._create_troopers_section()
+        root.addWidget(self._troopers_section_widget)
         self.basic_type_combo.currentIndexChanged.connect(self._update_stat_visibility)
 
         btn_bar = QtWidgets.QHBoxLayout()
@@ -880,19 +1020,41 @@ class ModelEditorDialog(QtWidgets.QDialog):
     def _update_stat_visibility(self) -> None:
         bt_data = self.basic_type_combo.currentData()
         bt = BasicType(bt_data) if bt_data is not None else None
+        is_unit = bt in _UNIT_TYPES
+
+        for row_w in self._unit_hidden_rows:
+            row_w.setVisible(not is_unit)
+        self._advantages_grp.setVisible(not is_unit)
+        self._resistances_grp.setVisible(not is_unit)
+        self._stats_section_widget.setVisible(not is_unit)
+        self._tabs_widget.setVisible(not is_unit)
+        self._troopers_section_widget.setVisible(is_unit)
+        self._update_short_name_visibility()
+
+        if is_unit:
+            self._refresh_trooper_model_names()
+            return
+
         caster_types = {BasicType.WARCASTER, BasicType.WARLOCK, BasicType.INFERNAL_MASTER}
         for stat in ("ARC", "CTRL"):
             self._stat_containers[stat].setVisible(bt in caster_types)
         for stat in ("FURY", "THR"):
             self._stat_containers[stat].setVisible(bt == BasicType.WARBEAST)
 
+    @QtCore.Slot()
+    def _update_short_name_visibility(self) -> None:
+        self._short_name_row.setVisible(self.is_char_cb.isChecked())
+
     def _create_top_section(self) -> QtWidgets.QWidget:
         widget = QtWidgets.QWidget()
-        grid = QtWidgets.QGridLayout(widget)
-        grid.setColumnStretch(1, 1)
-        grid.setColumnStretch(3, 2)
+        outer_h = QtWidgets.QHBoxLayout(widget)
 
-        # --- Left column: basic fields ---
+        # --- Left column: form rows in a VBox so hidden rows collapse ---
+        left_col = QtWidgets.QWidget()
+        left_v = QtWidgets.QVBoxLayout(left_col)
+        left_v.setContentsMargins(0, 0, 0, 0)
+        left_v.setSpacing(4)
+
         self.name_edit = QtWidgets.QLineEdit()
         self.short_name_edit = QtWidgets.QLineEdit()
 
@@ -918,7 +1080,17 @@ class ModelEditorDialog(QtWidgets.QDialog):
         self.fa_spin.setValue(-1)
         self.fa_spin.setSpecialValueText("∞")
 
-        rows = [
+        def _make_row(label_text: str, ctrl: QtWidgets.QWidget) -> QtWidgets.QWidget:
+            row_w = QtWidgets.QWidget()
+            row_h = QtWidgets.QHBoxLayout(row_w)
+            row_h.setContentsMargins(0, 0, 0, 0)
+            lbl = QtWidgets.QLabel(label_text)
+            lbl.setMinimumWidth(82)
+            row_h.addWidget(lbl)
+            row_h.addWidget(ctrl, stretch=1)
+            return row_w
+
+        form_rows = [
             ("Name:", self.name_edit),
             ("Short Name:", self.short_name_edit),
             ("Faction:", self.faction_combo),
@@ -928,19 +1100,29 @@ class ModelEditorDialog(QtWidgets.QDialog):
             ("Is Character:", self.is_char_cb),
             ("FA:", self.fa_spin),
         ]
-        for row_idx, (label, ctrl) in enumerate(rows):
-            grid.addWidget(QtWidgets.QLabel(label), row_idx, 0)
-            grid.addWidget(ctrl, row_idx, 1)
+        self._unit_hidden_rows: list[QtWidgets.QWidget] = []
+        self._short_name_row: QtWidgets.QWidget
+        for label_text, ctrl in form_rows:
+            row_w = _make_row(label_text, ctrl)
+            left_v.addWidget(row_w)
+            if label_text == "Short Name:":
+                self._short_name_row = row_w
+                row_w.setVisible(False)
+            elif label_text in ("Base Size:", "Is Character:"):
+                self._unit_hidden_rows.append(row_w)
+        self.is_char_cb.stateChanged.connect(self._update_short_name_visibility)
+        left_v.addStretch()
+        outer_h.addWidget(left_col)
 
         # --- Right column: vocal names ---
-        grid.addWidget(QtWidgets.QLabel("Vocal Names:"), 0, 2)
+        vn_list_col = QtWidgets.QVBoxLayout()
+        vn_list_col.addWidget(QtWidgets.QLabel("Vocal Names:"))
         self.vocal_list = QtWidgets.QListWidget()
         self.vocal_list.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
-        grid.addWidget(self.vocal_list, 0, 3, 6, 1)
-
+        vn_list_col.addWidget(self.vocal_list)
         self._vocal_dup_label = QtWidgets.QLabel()
         self._vocal_dup_label.setStyleSheet("color: crimson; font-style: italic;")
-        grid.addWidget(self._vocal_dup_label, 6, 3)
+        vn_list_col.addWidget(self._vocal_dup_label)
 
         vn_btns = QtWidgets.QVBoxLayout()
         self._record_vn_btn = QtWidgets.QPushButton("Record")
@@ -953,7 +1135,11 @@ class ModelEditorDialog(QtWidgets.QDialog):
         vn_btns.addWidget(self._record_vn_btn)
         vn_btns.addWidget(remove_vn)
         vn_btns.addStretch()
-        grid.addLayout(vn_btns, 0, 4, 6, 1)
+
+        vn_area = QtWidgets.QHBoxLayout()
+        vn_area.addLayout(vn_list_col)
+        vn_area.addLayout(vn_btns)
+        outer_h.addLayout(vn_area, stretch=2)
 
         return widget
 
@@ -962,26 +1148,37 @@ class ModelEditorDialog(QtWidgets.QDialog):
         widget = QtWidgets.QWidget()
         h = QtWidgets.QHBoxLayout(widget)
 
-        def make_tag(label: str, **kwargs) -> TagInputWidget:
+        def make_tag(label: str, **kwargs) -> tuple[TagInputWidget, QtWidgets.QGroupBox]:
             grp = QtWidgets.QGroupBox(label)
             v = QtWidgets.QVBoxLayout(grp)
             tag = TagInputWidget(**kwargs)
             v.addWidget(tag)
             h.addWidget(grp)
-            return tag
+            return tag, grp
 
         if self._db is not None:
-            self.armies_tag = make_tag(
+            self.armies_tag, _ = make_tag(
                 "Armies", str_values=self._db.armies, on_add=self._db.add_army
             )
-            self.keywords_tag = make_tag(
+            self.keywords_tag, _ = make_tag(
                 "Keywords", str_values=self._db.keywords, on_add=self._db.add_keyword
             )
         else:
-            self.armies_tag = make_tag("Armies", str_values=[])
-            self.keywords_tag = make_tag("Keywords", str_values=[])
-        self.advantages_tag = make_tag("Advantages", enum_cls=ModelAdvantage)
-        self.resistances_tag = make_tag("Resistances", enum_cls=ModelResistance)
+            self.armies_tag, _ = make_tag("Armies", str_values=[])
+            self.keywords_tag, _ = make_tag("Keywords", str_values=[])
+        self.advantages_tag, self._advantages_grp = make_tag(
+            "Advantages", enum_cls=ModelAdvantage
+        )
+
+        self._resistances_grp = QtWidgets.QGroupBox("Resistances")
+        res_v = QtWidgets.QVBoxLayout(self._resistances_grp)
+        self._resistance_cbs: dict[ModelResistance, QtWidgets.QCheckBox] = {}
+        for r in ModelResistance:
+            cb = QtWidgets.QCheckBox(r.value)
+            res_v.addWidget(cb)
+            self._resistance_cbs[r] = cb
+        res_v.addStretch()
+        h.addWidget(self._resistances_grp)
         return widget
 
     def _create_stats_section(self) -> QtWidgets.QWidget:
@@ -1017,6 +1214,24 @@ class ModelEditorDialog(QtWidgets.QDialog):
         tabs.addTab(self._create_weapons_tab(), "Weapons")
         tabs.addTab(self._create_hardpoints_tab(), "Hardpoints")
         return tabs
+
+    def _create_troopers_section(self) -> QtWidgets.QWidget:
+        grp = QtWidgets.QGroupBox("Troopers")
+        v = QtWidgets.QVBoxLayout(grp)
+        self.troopers_input = TrooperInputWidget()
+        if self._db is not None:
+            self._refresh_trooper_model_names()
+        v.addWidget(self.troopers_input)
+        return grp
+
+    def _refresh_trooper_model_names(self) -> None:
+        if self._db is None:
+            return
+        names = [
+            c.name for c in self._db.all_models()
+            if BasicType(c.basic_type) not in _UNIT_TYPES
+        ]
+        self.troopers_input.set_model_names(names)
 
     # -- Tab: Special Rules --
 
@@ -1243,7 +1458,8 @@ class ModelEditorDialog(QtWidgets.QDialog):
         self.armies_tag.set_values(card.armies)
         self.keywords_tag.set_values(card.keywords)
         self.advantages_tag.set_values(card.advantages)
-        self.resistances_tag.set_values(card.model_resistances)
+        for r, cb in self._resistance_cbs.items():
+            cb.setChecked(r in card.model_resistances)
 
         s = card.model_statistics
         self._stat_spins["SPD"].setValue(s.spd)
@@ -1271,6 +1487,7 @@ class ModelEditorDialog(QtWidgets.QDialog):
 
         self._hardpoint_groups = [list(g) for g in card.available_hardpoints]
         self._refresh_hardpoints_list()
+        self.troopers_input.set_entries(card.troopers)
         self._update_stat_visibility()
 
     def _reset_to_defaults(self) -> None:
@@ -1283,13 +1500,10 @@ class ModelEditorDialog(QtWidgets.QDialog):
         self.is_char_cb.setChecked(False)
         self.fa_spin.setValue(-1)
         self.vocal_list.clear()
-        for tag in (
-            self.armies_tag,
-            self.keywords_tag,
-            self.advantages_tag,
-            self.resistances_tag,
-        ):
+        for tag in (self.armies_tag, self.keywords_tag, self.advantages_tag):
             tag.clear()
+        for cb in self._resistance_cbs.values():
+            cb.setChecked(False)
         for spin in self._stat_spins.values():
             spin.setValue(-1)
         self.dmg_type_combo.setCurrentIndex(0)
@@ -1307,18 +1521,31 @@ class ModelEditorDialog(QtWidgets.QDialog):
         self._refresh_weapons_list()
         self._hardpoint_groups = []
         self._refresh_hardpoints_list()
+        self.troopers_input.clear()
 
     def _build_card(self) -> Optional[ModelStatCard]:
         name = self.name_edit.text().strip()
         if not name:
             QtWidgets.QMessageBox.warning(self, "Validation", "Name cannot be empty.")
             return None
-        short_name = self.short_name_edit.text().strip()
-        if not short_name:
+        basic_type = BasicType(self.basic_type_combo.currentData())
+        is_unit = basic_type in _UNIT_TYPES
+        is_character = self.is_char_cb.isChecked()
+        short_name = self.short_name_edit.text().strip() if is_character else ""
+        if is_character and not short_name:
             QtWidgets.QMessageBox.warning(
-                self, "Validation", "Short Name cannot be empty."
+                self, "Validation", "Short Name is required for character models."
             )
             return None
+        if short_name and self._db is not None:
+            original_name = self._original_card.name if self._original_card else None
+            for existing in self._db.all_models():
+                if existing.short_name == short_name and existing.name != original_name:
+                    QtWidgets.QMessageBox.warning(
+                        self, "Validation",
+                        f"Short Name '{short_name}' is already used by '{existing.name}'."
+                    )
+                    return None
         try:
             stats = ModelStatistics(
                 spd=self._stat_spins["SPD"].value(),
@@ -1336,17 +1563,21 @@ class ModelEditorDialog(QtWidgets.QDialog):
             QtWidgets.QMessageBox.warning(self, "Validation", str(exc))
             return None
 
+        vocal_names = [
+            self.vocal_list.item(i).text()
+            for i in range(self.vocal_list.count())
+        ]
+        if short_name and short_name not in vocal_names:
+            vocal_names.append(short_name)
+
         try:
             return ModelStatCard(
                 name=name,
                 short_name=short_name,
-                vocal_names=[
-                    self.vocal_list.item(i).text()
-                    for i in range(self.vocal_list.count())
-                ],
+                vocal_names=vocal_names,
                 faction=Faction(self.faction_combo.currentData()),
-                basic_type=BasicType(self.basic_type_combo.currentData()),
-                base_size=self.base_size_combo.currentData(),
+                basic_type=basic_type,
+                base_size=self.base_size_combo.currentData() if not is_unit else BASE_SIZES[0],
                 cost=self.cost_spin.value(),
                 model_statistics=stats,
                 damage_system_type=DamageSystemType(self.dmg_type_combo.currentData()),
@@ -1359,7 +1590,7 @@ class ModelEditorDialog(QtWidgets.QDialog):
                     ModelAdvantage(v) for v in self.advantages_tag.selected_values()
                 ],
                 model_resistances=[
-                    ModelResistance(v) for v in self.resistances_tag.selected_values()
+                    r for r, cb in self._resistance_cbs.items() if cb.isChecked()
                 ],
                 special_rules=self._list_widget_strings(self.special_rules_list),
                 special_actions=self._list_widget_strings(self.special_actions_list),
@@ -1369,6 +1600,7 @@ class ModelEditorDialog(QtWidgets.QDialog):
                 melee_weapons=[w for w in self._weapons if isinstance(w, MeleeWeapon)],
                 range_weapons=[w for w in self._weapons if isinstance(w, RangeWeapon)],
                 available_hardpoints=self._hardpoint_groups,
+                troopers=self.troopers_input.get_entries(),
             )
         except Exception as exc:
             QtWidgets.QMessageBox.warning(self, "Validation Error", str(exc))
@@ -1392,9 +1624,10 @@ class ModelEditorDialog(QtWidgets.QDialog):
         self.feat_edit.textChanged.connect(self._mark_dirty)
         for spin in self._stat_spins.values():
             spin.valueChanged.connect(self._mark_dirty)
-        for tag in (self.armies_tag, self.keywords_tag,
-                    self.advantages_tag, self.resistances_tag):
+        for tag in (self.armies_tag, self.keywords_tag, self.advantages_tag):
             tag.changed.connect(self._mark_dirty)
+        for cb in self._resistance_cbs.values():
+            cb.stateChanged.connect(self._mark_dirty)
         for lst in (self.vocal_list, self.special_rules_list,
                     self.special_actions_list, self.special_attacks_list,
                     self.spells_list):

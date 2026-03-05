@@ -184,11 +184,15 @@ class WarmachineDialog(GameDialog):
         # --- Row 3: sort ---
         sort_row = QtWidgets.QHBoxLayout()
         sort_row.addWidget(QtWidgets.QLabel("Sort by:"))
+        _DEFAULT_SORT = ["Faction", "Basic Type", "Base Size", "Is Character", "Name"]
         self.sort_combos: list[QtWidgets.QComboBox] = []
-        for _ in range(5):
+        for default_label in _DEFAULT_SORT:
             combo = QtWidgets.QComboBox()
             for label, key_fn in _SORT_OPTIONS:
                 combo.addItem(label, key_fn)
+            idx = combo.findText(default_label)
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
             combo.currentIndexChanged.connect(self._refresh_models_list)
             sort_row.addWidget(combo)
             self.sort_combos.append(combo)
@@ -432,9 +436,10 @@ class WarmachineDialog(GameDialog):
         models = self._apply_search(models)
         models = self._apply_sort(models)
         for m in models:
+            suffix = f", C={m.short_name}" if m.is_character and m.short_name else ""
             label = (
                 f"[{m.faction.value}]  {m.name}"
-                f"  ({m.basic_type.value}, {m.cost} pts)"
+                f"  ({m.basic_type.value}, {m.cost} pts{suffix})"
             )
             item = QtWidgets.QListWidgetItem(label)
             item.setData(QtCore.Qt.UserRole, m.name)
