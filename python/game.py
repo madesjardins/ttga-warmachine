@@ -37,7 +37,7 @@ from ttga.game_dialog import GameDialog, ZoneRequirement
 from .event_manager import GameEventManager
 from .model_database import ModelDatabase
 from .model_editor_dialog import ModelEditorDialog
-from .model_stat_card import ModelStatCard
+from .model_stat_card import BasicType, ModelStatCard
 
 _MODELS_DB_DIR = Path(__file__).parent.parent / "models_db"
 
@@ -180,6 +180,15 @@ class WarmachineDialog(GameDialog):
         self.search_mode_combo.currentIndexChanged.connect(self._refresh_models_list)
         search_row.addWidget(self.search_mode_combo)
         layout.addLayout(search_row)
+
+        # --- Row 2b: filters ---
+        filter_row = QtWidgets.QHBoxLayout()
+        self.hide_troopers_cb = QtWidgets.QCheckBox("Hide Troopers")
+        self.hide_troopers_cb.setChecked(True)
+        self.hide_troopers_cb.stateChanged.connect(self._refresh_models_list)
+        filter_row.addWidget(self.hide_troopers_cb)
+        filter_row.addStretch()
+        layout.addLayout(filter_row)
 
         # --- Row 3: sort ---
         sort_row = QtWidgets.QHBoxLayout()
@@ -449,6 +458,8 @@ class WarmachineDialog(GameDialog):
     def _apply_search(
         self, models: list[ModelStatCard]
     ) -> list[ModelStatCard]:
+        if self.hide_troopers_cb.isChecked():
+            models = [m for m in models if m.basic_type != BasicType.TROOPER]
         query = self.search_edit.text().strip()
         if not query:
             return models

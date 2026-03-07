@@ -57,6 +57,10 @@ from .weapon import (
     WeaponLocation,
     WeaponQuality,
 )
+from .weapon_special_rule import (
+    all_rule_names,
+    weapon_special_rule_from_name,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -300,12 +304,24 @@ class TagInputWidget(QtWidgets.QFrame):
                 key = event.key()
                 if key == Qt.Key_Escape:
                     self._search.clear()
+                    self._popup.hide()
                     return True
-                if key == Qt.Key_Down and self._popup.isVisible():
-                    self._dropdown.setFocus()
-                    if self._dropdown.count():
-                        self._dropdown.setCurrentRow(0)
-                    return True
+                if self._popup.isVisible():
+                    if key == Qt.Key_Down:
+                        nxt = self._dropdown.currentRow() + 1
+                        self._dropdown.setCurrentRow(
+                            min(nxt, self._dropdown.count() - 1)
+                        )
+                        return True
+                    if key == Qt.Key_Up:
+                        cur = self._dropdown.currentRow()
+                        self._dropdown.setCurrentRow(max(cur - 1, 0))
+                        return True
+                    if key in (Qt.Key_Return, Qt.Key_Enter):
+                        cur = self._dropdown.currentItem()
+                        if cur:
+                            self._on_suggestion_clicked(cur)
+                        return True
         if obj is self._dropdown:
             if event.type() == QtCore.QEvent.KeyPress:
                 key = event.key()
@@ -499,6 +515,9 @@ class WeaponEditorDialog(QtWidgets.QDialog):
         self._damage_type_cbs, dmg_row = self._make_checkbox_row(DamageType)
         self._form.addRow("Damage Types:", dmg_row)
 
+        self.special_rules_tag = TagInputWidget(str_values=all_rule_names())
+        self._form.addRow("Special Rules:", self.special_rules_tag)
+
         layout.addLayout(self._form)
 
         btn_box = QtWidgets.QDialogButtonBox(
@@ -553,6 +572,7 @@ class WeaponEditorDialog(QtWidgets.QDialog):
             cb.setChecked(e in weapon.critical_effects)
         for t, cb in self._damage_type_cbs.items():
             cb.setChecked(t in weapon.damage_types)
+        self.special_rules_tag.set_values([r.name for r in weapon.special_rules])
         self._on_type_changed()
 
     @QtCore.Slot()
@@ -582,6 +602,7 @@ class WeaponEditorDialog(QtWidgets.QDialog):
                 continuous_effects=cont_effects,
                 critical_effects=crit_effects,
                 damage_types=dmg_types,
+                special_rules=[weapon_special_rule_from_name(v) for v in self.special_rules_tag.selected_values()],
             )
         else:
             self._result = MeleeWeapon(
@@ -594,6 +615,7 @@ class WeaponEditorDialog(QtWidgets.QDialog):
                 continuous_effects=cont_effects,
                 critical_effects=crit_effects,
                 damage_types=dmg_types,
+                special_rules=[weapon_special_rule_from_name(v) for v in self.special_rules_tag.selected_values()],
             )
         self.accept()
 

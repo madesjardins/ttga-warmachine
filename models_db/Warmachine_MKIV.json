@@ -75,7 +75,8 @@
           "weapon_qualities": [],
           "continuous_effects": [],
           "critical_effects": [],
-          "damage_types": []
+          "damage_types": [],
+          "special_rules": []
         }
       ],
       "range_weapons": [
@@ -96,7 +97,8 @@
           ],
           "continuous_effects": [],
           "critical_effects": [],
-          "damage_types": []
+          "damage_types": [],
+          "special_rules": []
         }
       ],
       "available_hardpoints": []
@@ -158,7 +160,8 @@
           "weapon_qualities": [],
           "continuous_effects": [],
           "critical_effects": [],
-          "damage_types": []
+          "damage_types": [],
+          "special_rules": []
         }
       ],
       "range_weapons": [
@@ -181,7 +184,8 @@
           "critical_effects": [],
           "damage_types": [
             "Electricity"
-          ]
+          ],
+          "special_rules": []
         }
       ],
       "available_hardpoints": []
@@ -242,7 +246,8 @@
           "critical_effects": [],
           "damage_types": [
             "Magical"
-          ]
+          ],
+          "special_rules": []
         }
       ],
       "range_weapons": [],
@@ -265,6 +270,338 @@
       "troopers": [
         {
           "model_name": "Winter Guard Infantry Grunt",
+          "quantity": 5
+        }
+      ]
+    },
+    {
+      "name": "Stormblade Infantry",
+      "vocal_names": [
+        "storm blade infantry unit",
+        "storm blade infantry"
+      ],
+      "faction": "Cygnar",
+      "basic_type": "Unit",
+      "cost": 6,
+      "fa": 3,
+      "armies": [
+        "Cygnar",
+        "Storm Knights"
+      ],
+      "keywords": [
+        "Storm Knight"
+      ],
+      "troopers": [
+        {
+          "model_name": "Stormblade Infantry Grunt",
+          "quantity": 3
+        }
+      ]
+    },
+    {
+      "name": "Stormblade Infantry Storm Gunner",
+      "short_name": "",
+      "vocal_names": [
+        "storm blade infantry storm gardner"
+      ],
+      "faction": "Cygnar",
+      "basic_type": "Weapon Attachment",
+      "base_size": 30,
+      "cost": 1,
+      "model_statistics": {
+        "spd": 5,
+        "aat": -1,
+        "mat": 6,
+        "rat": 5,
+        "def": 12,
+        "arm": 16,
+        "arc": -1,
+        "fury": -1,
+        "ctrl": -1,
+        "thr": -1
+      },
+      "damage_system_type": "box",
+      "damage_system": {
+        "boxes": 1
+      },
+      "is_character": false,
+      "fa": 9,
+      "armies": [
+        "Cygnar",
+        "Storm Knights"
+      ],
+      "keywords": [
+        "Storm Knight"
+      ],
+      "advantages": [
+        "Dual Attack"
+      ],
+      "model_resistances": [
+        "Electricity"
+      ],
+      "feat": "",
+      "special_actions": [],
+      "special_attacks": [],
+      "spells": [],
+      "special_rules": [],
+      "melee_weapons": [
+        {
+          "weapon_type": "melee",
+          "name": "Electrical Blade",
+          "location": "Any",
+          "range": 1,
+          "power": 13,
+          "two_x": false,
+          "weapon_qualities": [],
+          "continuous_effects": [],
+          "critical_effects": [],
+          "damage_types": [],
+          "special_rules": []
+        }
+      ],
+      "range_weapons": [
+        {
+          "weapon_type": "range",
+          "name": "Storm Thrower",
+          "location": "Any",
+          "range": 8,
+          "power": 13,
+          "two_x": false,
+          "rof_dice": 0,
+          "rof_flat": 1,
+          "range_weapon_type": "Spray",
+          "area_of_effect": 0,
+          "blast_power": 0,
+          "weapon_qualities": [
+            "Pistol"
+          ],
+          "continuous_effects": [],
+          "critical_effects": [],
+          "damage_types": [
+            "Electricity"
+          ],
+          "special_rules": [
+            "Electrical Current"
+          ]
+        }
+      ],
+      "available_hardpoints": []
+    },
+    {
+      "name": "Winter Guard Rocketeers Grunt",
+      "short_name": "",
+      "vocal_names": [
+        "winter garden rocketeers grunt"
+      ],
+      "faction": "Khador",
+      "basic_type": "Trooper",
+      "base_size": 30,
+      "cost": 0,
+      "model_statistics": {
+        "spd": 6,
+        "aat": -1,
+        "mat": 5,
+        "rat": 5,
+        "def": 12,
+        "arm": 13,
+        "arc": -1,
+        "fury": -1,
+        "ctrl": -1,
+        "thr": -1
+      },
+      "damage_system_type": "box",
+      "damage_system": {
+        "boxes": 1
+      },
+      "is_character": false,
+      "fa": -1,
+      "armies": [
+        "Khador",
+        "5th Division"
+      ],
+      "keywords": [
+        "Winter Guard"
+      ],
+      "advantages": [],
+      "model_resistances": [],
+      "feat": "",
+      "special_actions": [],
+      "special_attacks": [],
+      "spells": [],
+      "special_rules": [],
+      "melee_weapons": [
+        {
+          "weapon_type": "melee",
+          "name": "Axe",
+          "location": "Any",
+          "range": 1,
+          "power": 8,
+          "two_x": false,
+          "weapon_qualities": [],
+          "continuous_effects": [],
+          "critical_effects": [],
+          "damage_types": [],
+          "special_rules": []
+        }
+      ],
+      "range_weapons": [
+        {
+          "weapon_type": "range",
+          "name": "Rocket",
+          "location": "Any",
+          "range": 14,
+          "power": 12,
+          "two_x": false,
+          "rof_dice": 0,
+          "rof_flat": 1,
+          "range_weapon_type": "Area of Effect",
+          "area_of_effect": 2,
+          "blast_power": 6,
+          "weapon_qualities": [],
+          "continuous_effects": [],
+          "critical_effects": [],
+          "damage_types": [],
+          "special_rules": [
+            "Brutal Damage"
+          ]
+        }
+      ],
+      "available_hardpoints": []
+    },
+    {
+      "name": "Winter Guard Rocketeers",
+      "vocal_names": [],
+      "faction": "Khador",
+      "basic_type": "Unit",
+      "cost": 6,
+      "fa": 4,
+      "armies": [
+        "Khador",
+        "5th Division"
+      ],
+      "keywords": [
+        "Winter Guard"
+      ],
+      "troopers": [
+        {
+          "model_name": "Winter Guard Rocketeers Grunt",
+          "quantity": 3
+        }
+      ]
+    },
+    {
+      "name": "Dark Sentinels",
+      "vocal_names": [
+        "dark santa know"
+      ],
+      "faction": "Infernals",
+      "basic_type": "Unit",
+      "cost": 5,
+      "fa": 3,
+      "armies": [
+        "Infernals"
+      ],
+      "keywords": [
+        "Cultist"
+      ],
+      "troopers": [
+        {
+          "model_name": "Dark Sentinels Grunt",
+          "quantity": 3
+        }
+      ]
+    },
+    {
+      "name": "Griever Swarm Grunt",
+      "short_name": "",
+      "vocal_names": [
+        "grievers swarm grunt",
+        "griever swarm grant",
+        "grievers swarm grant"
+      ],
+      "faction": "Infernals",
+      "basic_type": "Trooper",
+      "base_size": 30,
+      "cost": 0,
+      "model_statistics": {
+        "spd": 7,
+        "aat": -1,
+        "mat": -1,
+        "rat": 6,
+        "def": 13,
+        "arm": 12,
+        "arc": -1,
+        "fury": -1,
+        "ctrl": -1,
+        "thr": -1
+      },
+      "damage_system_type": "box",
+      "damage_system": {
+        "boxes": 1
+      },
+      "is_character": false,
+      "fa": -1,
+      "armies": [
+        "Infernals"
+      ],
+      "keywords": [],
+      "advantages": [
+        "Soulless",
+        "Flight",
+        "Eyeless Sight",
+        "Combined Ranged Attack"
+      ],
+      "model_resistances": [],
+      "feat": "",
+      "special_actions": [],
+      "special_attacks": [],
+      "spells": [],
+      "special_rules": [],
+      "melee_weapons": [],
+      "range_weapons": [
+        {
+          "weapon_type": "range",
+          "name": "Void Fire",
+          "location": "Any",
+          "range": 10,
+          "power": 12,
+          "two_x": false,
+          "rof_dice": 0,
+          "rof_flat": 1,
+          "range_weapon_type": "Shot",
+          "area_of_effect": 0,
+          "blast_power": 0,
+          "weapon_qualities": [
+            "Pistol"
+          ],
+          "continuous_effects": [],
+          "critical_effects": [
+            "Fire"
+          ],
+          "damage_types": [
+            "Magical"
+          ],
+          "special_rules": []
+        }
+      ],
+      "available_hardpoints": []
+    },
+    {
+      "name": "Griever Swarm",
+      "vocal_names": [
+        "grievers swarm"
+      ],
+      "faction": "Infernals",
+      "basic_type": "Unit",
+      "cost": 6,
+      "fa": 4,
+      "armies": [
+        "Infernals"
+      ],
+      "keywords": [],
+      "troopers": [
+        {
+          "model_name": "Griever Swarm Grunt",
           "quantity": 5
         }
       ]

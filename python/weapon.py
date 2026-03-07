@@ -27,6 +27,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Union
 
+from .weapon_special_rule import (
+    WeaponSpecialRule,
+    weapon_special_rule_from_name,
+)
+
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -145,6 +150,7 @@ class MeleeWeapon:
     continuous_effects: list[ContinuousEffect] = field(default_factory=list)
     critical_effects: list[CriticalEffect] = field(default_factory=list)
     damage_types: list[DamageType] = field(default_factory=list)
+    special_rules: list[WeaponSpecialRule] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a JSON-compatible dictionary.
@@ -167,6 +173,7 @@ class MeleeWeapon:
             "continuous_effects": [e.value for e in self.continuous_effects],
             "critical_effects": [e.value for e in self.critical_effects],
             "damage_types": [t.value for t in self.damage_types],
+            "special_rules": [r.name for r in self.special_rules],
         }
 
     @classmethod
@@ -194,6 +201,7 @@ class MeleeWeapon:
             continuous_effects=[ContinuousEffect(e) for e in data.get("continuous_effects", [])],
             critical_effects=[CriticalEffect(e) for e in data.get("critical_effects", [])],
             damage_types=[DamageType(t) for t in data.get("damage_types", [])],
+            special_rules=[weapon_special_rule_from_name(r) for r in data.get("special_rules", [])],
         )
 
 
@@ -231,6 +239,7 @@ class RangeWeapon:
     continuous_effects: list[ContinuousEffect] = field(default_factory=list)
     critical_effects: list[CriticalEffect] = field(default_factory=list)
     damage_types: list[DamageType] = field(default_factory=list)
+    special_rules: list[WeaponSpecialRule] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a JSON-compatible dictionary.
@@ -258,6 +267,7 @@ class RangeWeapon:
             "continuous_effects": [e.value for e in self.continuous_effects],
             "critical_effects": [e.value for e in self.critical_effects],
             "damage_types": [t.value for t in self.damage_types],
+            "special_rules": [r.name for r in self.special_rules],
         }
 
     @classmethod
@@ -291,6 +301,7 @@ class RangeWeapon:
             continuous_effects=[ContinuousEffect(e) for e in data.get("continuous_effects", [])],
             critical_effects=[CriticalEffect(e) for e in data.get("critical_effects", [])],
             damage_types=[DamageType(t) for t in data.get("damage_types", [])],
+            special_rules=[weapon_special_rule_from_name(r) for r in data.get("special_rules", [])],
         )
 
 
