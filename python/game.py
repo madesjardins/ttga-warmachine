@@ -33,13 +33,16 @@ if TYPE_CHECKING:
 
 from ttga.game_base import GameBase
 from ttga.game_dialog import GameDialog, ZoneRequirement
+from ttga.qr_detection import QRDetector
 
 from .event_manager import GameEventManager
+from .match import Match
 from .model_database import ModelDatabase
 from .model_editor_dialog import ModelEditorDialog
 from .model_stat_card import BasicType, ModelStatCard
 
 _MODELS_DB_DIR = Path(__file__).parent.parent / "models_db"
+_MAX_LOG_DISPLAY_LINES = 100
 
 _SORT_OPTIONS: list[tuple[str, Optional[Callable]]] = [
     ("(None)", None),
@@ -82,11 +85,19 @@ class WarmachineDialog(GameDialog):
         self.game_instance = game_instance
         self._current_db: Optional[ModelDatabase] = None
         self._event_manager = event_manager
+        self._match: Optional[Match] = None
         super().__init__(core, game_name, zone_requirements, parent)
 
         # Add extra tabs after base class has built the tab widget
         models_tab = self._create_models_tab()
         self.tabs.addTab(models_tab, "Models")
+
+        ingame_tab = self._create_ingame_tab()
+        self._ingame_tab_index = self.tabs.addTab(ingame_tab, "In-game")
+
+        log_tab = self._create_log_tab()
+        self._log_tab_index = self.tabs.addTab(log_tab, "Log")
+
         self._populate_database_combo()
 
     def _create_main_tab(self) -> QtWidgets.QWidget:
@@ -106,7 +117,27 @@ class WarmachineDialog(GameDialog):
         instructions.setWordWrap(True)
         layout.addWidget(instructions)
 
-        layout.addSpacing(20)
+        layout.addSpacing(10)
+
+        # Game Mode
+        mode_row = QtWidgets.QHBoxLayout()
+        mode_row.addWidget(QtWidgets.QLabel("Game Mode:"))
+        self.game_mode_combo = QtWidgets.QComboBox()
+        self.game_mode_combo.addItem("Single Match", "single_match")
+        mode_row.addWidget(self.game_mode_combo, stretch=1)
+        layout.addLayout(mode_row)
+
+        # Options (empty placeholder for now)
+        self.options_group = QtWidgets.QGroupBox("Options")
+        options_layout = QtWidgets.QVBoxLayout(self.options_group)
+        self._options_placeholder = QtWidgets.QLabel(
+            "No options available for this game mode."
+        )
+        self._options_placeholder.setStyleSheet("color: #888;")
+        options_layout.addWidget(self._options_placeholder)
+        layout.addWidget(self.options_group)
+
+        layout.addSpacing(10)
 
         # Game status
         self.game_status_label = QtWidgets.QLabel("Game Status: Not Started")
@@ -115,7 +146,7 @@ class WarmachineDialog(GameDialog):
         )
         layout.addWidget(self.game_status_label)
 
-        layout.addSpacing(20)
+        layout.addSpacing(10)
 
         # Start/Stop buttons
         button_layout = QtWidgets.QHBoxLayout()
@@ -132,6 +163,89 @@ class WarmachineDialog(GameDialog):
         layout.addLayout(button_layout)
 
         layout.addStretch()
+
+        return widget
+
+    # ------------------------------------------------------------------
+    # In-game tab
+    # ------------------------------------------------------------------
+
+    def _create_ingame_tab(self) -> QtWidgets.QWidget:
+        """Create the In-game tab with phase display and army lists."""
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(widget)
+
+        # Phase title
+        self.phase_title_label = QtWidgets.QLabel("No match in progress.")
+        self.phase_title_label.setStyleSheet(
+            "QLabel { font-size: 16px; font-weight: bold; padding: 6px; }"
+        )
+        layout.addWidget(self.phase_title_label)
+
+        # Status / instruction line
+        self.ingame_status_label = QtWidgets.QLabel("")
+        self.ingame_status_label.setWordWrap(True)
+        self.ingame_status_label.setStyleSheet(
+            "QLabel { padding: 4px; color: #555; }"
+        )
+        layout.addWidget(self.ingame_status_label)
+
+        # Army lists (side by side)
+        armies_row = QtWidgets.QHBoxLayout()
+
+        p1_group = QtWidgets.QGroupBox("Player 1 Army")
+        p1_layout = QtWidgets.QVBoxLayout(p1_group)
+        self.p1_army_list = QtWidgets.QListWidget()
+        self.p1_army_list.setAlternatingRowColors(True)
+        p1_layout.addWidget(self.p1_army_list)
+        self.p1_points_label = QtWidgets.QLabel("Total: 0 pts")
+        self.p1_points_label.setStyleSheet(
+            "QLabel { font-weight: bold; padding: 4px; }"
+        )
+        self.p1_points_label.setAlignment(QtCore.Qt.AlignRight)
+        p1_layout.addWidget(self.p1_points_label)
+        armies_row.addWidget(p1_group)
+
+        p2_group = QtWidgets.QGroupBox("Player 2 Army")
+        p2_layout = QtWidgets.QVBoxLayout(p2_group)
+        self.p2_army_list = QtWidgets.QListWidget()
+        self.p2_army_list.setAlternatingRowColors(True)
+        p2_layout.addWidget(self.p2_army_list)
+        self.p2_points_label = QtWidgets.QLabel("Total: 0 pts")
+        self.p2_points_label.setStyleSheet(
+            "QLabel { font-weight: bold; padding: 4px; }"
+        )
+        self.p2_points_label.setAlignment(QtCore.Qt.AlignRight)
+        p2_layout.addWidget(self.p2_points_label)
+        armies_row.addWidget(p2_group)
+
+        layout.addLayout(armies_row, stretch=1)
+
+        # General-purpose content area for future phases
+        self.ingame_content_area = QtWidgets.QStackedWidget()
+        empty_page = QtWidgets.QWidget()
+        self.ingame_content_area.addWidget(empty_page)
+        layout.addWidget(self.ingame_content_area)
+
+        return widget
+
+    # ------------------------------------------------------------------
+    # Log tab
+    # ------------------------------------------------------------------
+
+    def _create_log_tab(self) -> QtWidgets.QWidget:
+        """Create the Log tab showing the latest narrator / player lines."""
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(widget)
+
+        self.log_text = QtWidgets.QPlainTextEdit()
+        self.log_text.setReadOnly(True)
+        self.log_text.setMaximumBlockCount(_MAX_LOG_DISPLAY_LINES)
+        self.log_text.setStyleSheet(
+            "QPlainTextEdit { font-family: 'Segoe UI', sans-serif; "
+            "font-size: 12px; line-height: 1.4; }"
+        )
+        layout.addWidget(self.log_text)
 
         return widget
 
@@ -250,34 +364,175 @@ class WarmachineDialog(GameDialog):
             )
             return
 
-        zone_mapping = self.get_zone_mapping()
-
-        success = self.game_instance.start_game(zone_mapping)
-
-        if success:
-            self.game_status_label.setText("Game Status: Running")
-            self.game_status_label.setStyleSheet(
-                "QLabel { font-weight: bold; padding: 10px; background-color: #ccffcc; color: #008800; }"
+        if self._current_db is None:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "No Database",
+                "Please select a models database before starting the game."
             )
-            self.start_game_button.setEnabled(False)
-            self.stop_game_button.setEnabled(True)
-        else:
+            return
+
+        zone_mapping = self.get_zone_mapping()
+        success = self.game_instance.start_game(zone_mapping)
+        if not success:
             QtWidgets.QMessageBox.critical(
                 self,
                 "Game Start Failed",
                 "Failed to start the game. Check console for errors."
             )
+            return
+
+        # Create a Match based on game mode
+        narrator = getattr(self.game_instance.core, "narrator", None)
+        self._match = Match(
+            db=self._current_db,
+            event_manager=self._event_manager,
+            narrator=narrator,
+            parent=self,
+        )
+
+        # Wire match signals
+        self._match.phase_changed.connect(self._on_phase_changed)
+        self._match.match_ended.connect(self._on_match_ended)
+        self._match.log.line_added.connect(self._on_log_line)
+
+        # Wire army creation signals once the phase starts
+        self._match.phase_changed.connect(self._wire_army_creation)
+
+        # Update UI
+        self.game_status_label.setText("Game Status: Running")
+        self.game_status_label.setStyleSheet(
+            "QLabel { font-weight: bold; padding: 10px; "
+            "background-color: #ccffcc; color: #008800; }"
+        )
+        self.start_game_button.setEnabled(False)
+        self.stop_game_button.setEnabled(True)
+
+        # Clear In-game tab
+        self.p1_army_list.clear()
+        self.p2_army_list.clear()
+        self.log_text.clear()
+
+        # Switch to In-game tab and start the match
+        self.tabs.setCurrentIndex(self._ingame_tab_index)
+        self._match.start()
 
     def _on_stop_game(self) -> None:
         """Handle stop game button click."""
+        if self._match is not None:
+            self._match.stop()
+            self._match = None
+
         self.game_instance.stop_game()
 
         self.game_status_label.setText("Game Status: Stopped")
         self.game_status_label.setStyleSheet(
-            "QLabel { font-weight: bold; padding: 10px; background-color: #ffcccc; color: #cc0000; }"
+            "QLabel { font-weight: bold; padding: 10px; "
+            "background-color: #ffcccc; color: #cc0000; }"
         )
         self.start_game_button.setEnabled(True)
         self.stop_game_button.setEnabled(False)
+        self.phase_title_label.setText("No match in progress.")
+        self.ingame_status_label.setText("")
+        self.p1_army_list.clear()
+        self.p2_army_list.clear()
+        self._update_army_points()
+
+    # ------------------------------------------------------------------
+    # Match signal handlers
+    # ------------------------------------------------------------------
+
+    @QtCore.Slot(str)
+    def _on_phase_changed(self, phase_value: str) -> None:
+        self.phase_title_label.setText(phase_value)
+
+    @QtCore.Slot()
+    def _on_match_ended(self) -> None:
+        self.phase_title_label.setText("Match ended.")
+        self.ingame_status_label.setText("")
+
+    @QtCore.Slot(str)
+    def _on_log_line(self, text: str) -> None:
+        self.log_text.appendPlainText(text)
+
+    @QtCore.Slot(str)
+    def _wire_army_creation(self, phase_value: str) -> None:
+        """Connect army-creation signals when that phase starts."""
+        if self._match is None or self._match.army_creation is None:
+            return
+        # A fresh army-building session is starting: clear any previous lists.
+        self.p1_army_list.clear()
+        self.p2_army_list.clear()
+        self._update_army_points()
+        ac = self._match.army_creation
+        ac.model_added.connect(self._on_army_model_added)
+        ac.qr_progress.connect(self._on_army_qr_progress)
+        ac.model_cancelled.connect(self._on_army_model_cancelled)
+        ac.status_changed.connect(self._on_ingame_status)
+
+    @staticmethod
+    def _format_army_entry(
+        model_name: str, codes: list, required: int
+    ) -> str:
+        """Two-line army item: name + status, then per-trooper QR values."""
+        line1 = f"{model_name} — {len(codes)}/{required} QRs"
+        if required <= 1:
+            line2 = f"QR: {codes[0] if codes else '-'}"
+        else:
+            parts = []
+            for i in range(required):
+                letter = chr(ord("A") + i) if i < 26 else f"#{i + 1}"
+                value = codes[i] if i < len(codes) else "-"
+                parts.append(f"{letter}: {value}")
+            line2 = ", ".join(parts)
+        return f"{line1}\n{line2}"
+
+    def _update_army_points(self) -> None:
+        """Recompute and display each army's total point cost."""
+        ac = self._match.army_creation if self._match is not None else None
+        labels = (self.p1_points_label, self.p2_points_label)
+        for idx, label in enumerate(labels):
+            if ac is None:
+                label.setText("Total: 0 pts")
+                continue
+            total = sum(getattr(card, "cost", 0) for card in ac.armies[idx])
+            label.setText(f"Total: {total} pts")
+
+    @QtCore.Slot(int, str, int)
+    def _on_army_model_added(
+        self, player_index: int, model_name: str, required_qr: int
+    ) -> None:
+        target = self.p1_army_list if player_index == 0 else self.p2_army_list
+        item = QtWidgets.QListWidgetItem(
+            self._format_army_entry(model_name, [], required_qr)
+        )
+        item.setData(QtCore.Qt.UserRole, (model_name, required_qr))
+        target.addItem(item)
+        target.scrollToItem(item)
+        self._update_army_points()
+
+    @QtCore.Slot(int, list, int)
+    def _on_army_qr_progress(
+        self, player_index: int, codes: list, required: int
+    ) -> None:
+        target = self.p1_army_list if player_index == 0 else self.p2_army_list
+        item = target.item(target.count() - 1)
+        if item is None:
+            return
+        data = item.data(QtCore.Qt.UserRole)
+        model_name = data[0] if data else "?"
+        item.setText(self._format_army_entry(model_name, list(codes), required))
+
+    @QtCore.Slot(int)
+    def _on_army_model_cancelled(self, player_index: int) -> None:
+        target = self.p1_army_list if player_index == 0 else self.p2_army_list
+        if target.count() > 0:
+            target.takeItem(target.count() - 1)
+        self._update_army_points()
+
+    @QtCore.Slot(str)
+    def _on_ingame_status(self, text: str) -> None:
+        self.ingame_status_label.setText(text)
 
     # ------------------------------------------------------------------
     # Database combo helpers
@@ -603,6 +858,11 @@ class Game(GameBase):
         self.projector_overlays: dict[str, np.ndarray] = {}
         self.zone_mapping: dict[str, str] = {}
 
+        # QR detectors (internal_name -> QRDetector) and their signal
+        # connections, kept for clean disconnection on stop.
+        self.qr_detectors: dict[str, QRDetector] = {}
+        self.qr_detector_connections: dict[str, Callable] = {}
+
     def get_metadata(self) -> dict[str, str]:
         """Get game metadata from YAML configuration.
 
@@ -687,6 +947,34 @@ class Game(GameBase):
                         self.projector_overlays[zone_name] = np.zeros((height_px, width_px, 4), dtype=np.uint8)
                         print(f"[Warmachine] Created projector overlay for zone '{zone_name}' ({width_px}x{height_px})")
 
+        # Create QR detectors for zones flagged with enable_qr_detector and
+        # route their detections through the shared event manager.
+        for zone_config in self.config.get('zones', []):
+            if not zone_config.get('enable_qr_detector', False):
+                continue
+            internal_name = zone_config['internal_name']
+            zone_name = zone_mapping.get(internal_name)
+            if not zone_name:
+                continue
+            zone = self.core.zone_manager.get_zone(zone_name)
+            if zone is None:
+                continue
+            detector = QRDetector(
+                zone, self.core.camera_manager, self.core.qr_code_refresh_rate
+            )
+            connection = (
+                lambda dets, zn=zone_name:
+                self.event_manager.route_detection(dets, zn)
+            )  # noqa: E731
+            detector.detections_updated.connect(connection)
+            detector.start()
+            self.qr_detectors[internal_name] = detector
+            self.qr_detector_connections[internal_name] = connection
+            print(
+                f"[Warmachine] Started QR detector for zone '{zone_name}' "
+                f"at {self.core.qr_code_refresh_rate} Hz"
+            )
+
         self.is_running = True
         print("[Warmachine] Game started successfully")
         return True
@@ -697,6 +985,18 @@ class Game(GameBase):
             return
 
         print("[Warmachine] Stopping game...")
+
+        # Stop and disconnect QR detectors.
+        for internal_name, detector in self.qr_detectors.items():
+            detector.stop()
+            connection = self.qr_detector_connections.get(internal_name)
+            if connection is not None:
+                try:
+                    detector.detections_updated.disconnect(connection)
+                except (RuntimeError, TypeError):
+                    pass
+        self.qr_detectors.clear()
+        self.qr_detector_connections.clear()
 
         self.camera_overlays.clear()
         self.projector_overlays.clear()

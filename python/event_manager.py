@@ -7,9 +7,12 @@ etc.), routing them to whichever game component is currently listening.
 
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 from PySide6 import QtCore
+
+if TYPE_CHECKING:
+    from ttga.qr_detection import QRDetection
 
 
 class GameEventManager(QtCore.QObject):
@@ -32,10 +35,14 @@ class GameEventManager(QtCore.QObject):
     """
 
     speech_received = QtCore.Signal(str)
+    detections_received = QtCore.Signal(list, str)
 
     def __init__(self, parent: Optional[QtCore.QObject] = None) -> None:
         super().__init__(parent)
         self._speech_handlers: list[Callable[[str], None]] = []
+        self._detection_handlers: list[
+            Callable[[list[QRDetection], str], None]
+        ] = []
 
     # ------------------------------------------------------------------
     # Speech
@@ -75,3 +82,51 @@ class GameEventManager(QtCore.QObject):
         self.speech_received.emit(text)
         if self._speech_handlers:
             self._speech_handlers[-1](text)
+
+    # ------------------------------------------------------------------
+    # QR code detections
+    # ------------------------------------------------------------------
+
+    def push_detection_handler(
+        self, handler: Callable[[list[QRDetection], str], None]
+    ) -> None:
+        """Push a QR-detection handler onto the top of the stack.
+
+        Args:
+            handler: Callable accepting ``(detections, zone_name)``.
+        """
+        if handler not in self._detection_handlers:
+            self._detection_handlers.append(handler)
+
+    def pop_detection_handler(
+        self, handler: Callable[[list[QRDetection], str], None]
+    ) -> None:
+        """Remove a QR-detection handler from the stack.
+
+        Args:
+            handler: The callable to remove.  No-op if not registered.
+        """
+        try:
+            self._detection_handlers.remove(handler)
+        except ValueError:
+            pass
+
+    @QtCore.Slot(list, str)
+    def route_detection(
+        self, detections: list[QRDetection], zone_name: str
+    ) -> None:
+        """Route QR detections to the top-of-stack handler.
+
+        The topmost handler (most recently registered) receives the
+        detections exclusively.  The :attr:`detections_received` signal is
+        always emitted regardless, so passive listeners always see every
+        result.
+
+        Args:
+            detections: List of :class:`QRDetection` objects in camera ROI
+                coordinates.
+            zone_name: Name of the zone where detections occurred.
+        """
+        self.detections_received.emit(detections, zone_name)
+        if self._detection_handlers:
+            self._detection_handlers[-1](detections, zone_name)
