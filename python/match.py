@@ -30,6 +30,8 @@ from .army_creation import ArmyCreation
 from .game_log import GameLog
 
 if TYPE_CHECKING:
+    from ttga.narration_engine import NarrationEngine
+
     from .event_manager import GameEventManager
     from .model_database import ModelDatabase
 
@@ -58,12 +60,14 @@ class Match(QtCore.QObject):
         db: ModelDatabase,
         event_manager: GameEventManager,
         narrator: Any = None,
+        narration_engine: Optional[NarrationEngine] = None,
         parent: Optional[QtCore.QObject] = None,
     ) -> None:
         super().__init__(parent)
         self._db = db
         self._event_manager = event_manager
         self._narrator = narrator
+        self._narration = narration_engine
         self._phase: Optional[MatchPhase] = None
         self._log = GameLog(parent=self)
         self._army_creation: Optional[ArmyCreation] = None
@@ -115,6 +119,7 @@ class Match(QtCore.QObject):
             event_manager=self._event_manager,
             game_log=self._log,
             narrator=self._narrator,
+            narration_engine=self._narration,
             parent=self,
         )
         self._army_creation.phase_completed.connect(

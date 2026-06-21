@@ -33,6 +33,7 @@ if TYPE_CHECKING:
 
 from ttga.game_base import GameBase
 from ttga.game_dialog import GameDialog, ZoneRequirement
+from ttga.narration_engine import NarrationEngine
 from ttga.qr_detection import QRDetector
 
 from .event_manager import GameEventManager
@@ -40,6 +41,7 @@ from .match import Match
 from .model_database import ModelDatabase
 from .model_editor_dialog import ModelEditorDialog
 from .model_stat_card import BasicType, ModelStatCard
+from .persona import WARMACHINE_PERSONA
 
 _MODELS_DB_DIR = Path(__file__).parent.parent / "models_db"
 _MAX_LOG_DISPLAY_LINES = 100
@@ -383,11 +385,20 @@ class WarmachineDialog(GameDialog):
             return
 
         # Create a Match based on game mode
-        narrator = getattr(self.game_instance.core, "narrator", None)
+        core = self.game_instance.core
+        narrator = getattr(core, "narrator", None)
+        # The LLM client is optional and owned at core level (added in a later
+        # step). When absent or unavailable, NarrationEngine falls back to the
+        # scripted lines, so the game runs identically without an LLM.
+        llm_client = getattr(core, "llm_client", None)
+        narration_engine = NarrationEngine(
+            llm_client=llm_client, persona=WARMACHINE_PERSONA
+        )
         self._match = Match(
             db=self._current_db,
             event_manager=self._event_manager,
             narrator=narrator,
+            narration_engine=narration_engine,
             parent=self,
         )
 

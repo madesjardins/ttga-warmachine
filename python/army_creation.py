@@ -26,6 +26,8 @@ from typing import TYPE_CHECKING, Any, Optional
 from PySide6 import QtCore
 
 if TYPE_CHECKING:
+    from ttga.narration_engine import NarrationEngine
+
     from .event_manager import GameEventManager
     from .game_log import GameLog
     from .model_database import ModelDatabase
@@ -62,6 +64,7 @@ class ArmyCreation(QtCore.QObject):
         event_manager: GameEventManager,
         game_log: GameLog,
         narrator: Any = None,
+        narration_engine: Optional[NarrationEngine] = None,
         parent: Optional[QtCore.QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -69,6 +72,7 @@ class ArmyCreation(QtCore.QObject):
         self._event_manager = event_manager
         self._log = game_log
         self._narrator = narrator
+        self._narration = narration_engine
         self._armies: list[list[ModelStatCard]] = [[], []]
         # QR codes assigned to each army entry, parallel to ``_armies``.
         self._qr_codes: list[list[list[str]]] = [[], []]
@@ -131,14 +135,22 @@ class ArmyCreation(QtCore.QObject):
     # ------------------------------------------------------------------
 
     def _say(self, text: str) -> None:
-        """Speak *text* via the narrator, log it, and emit :attr:`narrate`."""
-        self._log.narrate(text)
+        """Speak *text* via the narrator, log it, and emit :attr:`narrate`.
+
+        When a :class:`NarrationEngine` is configured and active, the scripted
+        ``text`` is rephrased in-character; otherwise it is spoken verbatim. The
+        scripted ``text`` always serves as the fallback.
+        """
+        spoken = text
+        if self._narration is not None:
+            spoken = self._narration.phrase(text)
+        self._log.narrate(spoken)
         if self._narrator is not None:
             try:
-                self._narrator.synthesize_and_play(text)
+                self._narrator.synthesize_and_play(spoken)
             except Exception:
                 pass
-        self.narrate.emit(text)
+        self.narrate.emit(spoken)
 
     # ------------------------------------------------------------------
     # Prompting
