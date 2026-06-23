@@ -27,6 +27,7 @@ from PySide6 import QtCore
 
 if TYPE_CHECKING:
     from ttga.narration_engine import NarrationEngine
+    from ttga.narration_service import NarrationService
 
     from .event_manager import GameEventManager
     from .game_log import GameLog
@@ -58,6 +59,19 @@ class ArmyCreation(QtCore.QObject):
     narrate = QtCore.Signal(str)
     status_changed = QtCore.Signal(str)
 
+    # Allowed intents (name -> description) for the model-adding step, supplied
+    # to the NarrationEngine for NLU. Python remains authoritative: an extracted
+    # model name is always validated against the database via ``_find_model``.
+    _ADD_MODEL_INTENTS = {
+        "add_model": (
+            "the player named a model or unit to add to their army "
+            "(value = the spoken model or unit name)"
+        ),
+        "army_completed": (
+            "the player is finished and wants to complete their army"
+        ),
+    }
+
     def __init__(
         self,
         db: ModelDatabase,
@@ -65,6 +79,7 @@ class ArmyCreation(QtCore.QObject):
         game_log: GameLog,
         narrator: Any = None,
         narration_engine: Optional[NarrationEngine] = None,
+        narration_service: Optional[NarrationService] = None,
         parent: Optional[QtCore.QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -73,6 +88,11 @@ class ArmyCreation(QtCore.QObject):
         self._log = game_log
         self._narrator = narrator
         self._narration = narration_engine
+        self._service = narration_service
+        # Async intent-parsing state (used only when a service is present).
+        self._awaiting_intent: bool = False
+        self._pending_text: str = ""
+        self._intent_req_id: int = -1
         self._armies: list[list[ModelStatCard]] = [[], []]
         # QR codes assigned to each army entry, parallel to ``_armies``.
         self._qr_codes: list[list[list[str]]] = [[], []]
@@ -118,6 +138,10 @@ class ArmyCreation(QtCore.QObject):
         self._pending_card = None
         self._collected_qr = []
         self._used_qr = set()
+        self._awaiting_intent = False
+        if self._service is not None:
+            self._service.narrated.connect(self._on_narrated)
+            self._service.intent_parsed.connect(self._on_intent_parsed)
         self._event_manager.push_speech_handler(self._on_speech)
         self._say("Army creation begins.")
         self._prompt_next_model()
@@ -128,6 +152,12 @@ class ArmyCreation(QtCore.QObject):
         if self._collecting:
             self._event_manager.pop_detection_handler(self._on_detection)
             self._collecting = False
+        if self._service is not None:
+            try:
+                self._service.narrated.disconnect(self._on_narrated)
+                self._service.intent_parsed.disconnect(self._on_intent_parsed)
+            except (RuntimeError, TypeError):
+                pass
         self._event_manager.pop_speech_handler(self._on_speech)
 
     # ------------------------------------------------------------------
@@ -135,12 +165,18 @@ class ArmyCreation(QtCore.QObject):
     # ------------------------------------------------------------------
 
     def _say(self, text: str) -> None:
-        """Speak *text* via the narrator, log it, and emit :attr:`narrate`.
+        """Speak *text*, rephrasing in-character when an LLM is available.
 
-        When a :class:`NarrationEngine` is configured and active, the scripted
-        ``text`` is rephrased in-character; otherwise it is spoken verbatim. The
-        scripted ``text`` always serves as the fallback.
+        With a :class:`NarrationService`, phrasing and TTS run off the main
+        thread (streamed sentence by sentence) and logging happens when the
+        :attr:`NarrationService.narrated` signal fires. Otherwise this performs
+        the synchronous phrase/log/play path, with the scripted ``text`` as the
+        fallback.
         """
+        if self._service is not None:
+            self._service.speak(text)
+            return
+
         spoken = text
         if self._narration is not None:
             spoken = self._narration.phrase(text)
@@ -151,6 +187,12 @@ class ArmyCreation(QtCore.QObject):
             except Exception:
                 pass
         self.narrate.emit(spoken)
+
+    @QtCore.Slot(str)
+    def _on_narrated(self, text: str) -> None:
+        """Log and re-emit narration produced asynchronously by the service."""
+        self._log.narrate(text)
+        self.narrate.emit(text)
 
     # ------------------------------------------------------------------
     # Prompting
@@ -195,13 +237,67 @@ class ArmyCreation(QtCore.QObject):
                 )
             return
 
-        # --- "army completed" ---
-        if lower == "army completed":
+        # --- Intent parsing (NLU) with deterministic fallback ---
+        # With a service, parse off the main thread and continue when the
+        # result arrives. Otherwise parse synchronously (or fall back to the
+        # exact-string logic when no LLM is available).
+        context = {
+            "player": player_label,
+            "models_added": len(self._armies[self._current_player]),
+        }
+        if self._service is not None:
+            if self._awaiting_intent:
+                return  # Ignore overlapping speech while a parse is in flight.
+            self._awaiting_intent = True
+            self._pending_text = text
+            self._intent_req_id = self._service.parse_intent_async(
+                text.strip(), self._ADD_MODEL_INTENTS, context=context
+            )
+            return
+
+        intent_name: Optional[str] = None
+        intent_value: Optional[str] = None
+        if self._narration is not None:
+            parsed = self._narration.parse_intent(
+                text.strip(), self._ADD_MODEL_INTENTS, context=context
+            )
+            if not parsed.is_unknown:
+                intent_name = parsed.intent
+                intent_value = parsed.value
+
+        self._apply_add_model_intent(text, intent_name, intent_value)
+
+    @QtCore.Slot(int, object)
+    def _on_intent_parsed(self, req_id: int, intent: Any) -> None:
+        """Continue the speech handling once an async intent parse completes."""
+        if self._service is None or req_id != self._intent_req_id:
+            return
+        self._awaiting_intent = False
+        if not self._active or self._collecting:
+            return
+        intent_name = None if intent.is_unknown else intent.intent
+        intent_value = None if intent.is_unknown else intent.value
+        self._apply_add_model_intent(self._pending_text, intent_name, intent_value)
+
+    def _apply_add_model_intent(
+        self, text: str, intent_name: Optional[str], intent_value: Optional[str]
+    ) -> None:
+        """Act on a parsed (or fallback) add-model / army-completed intent."""
+        lower = text.strip().lower()
+
+        # --- "army completed" (LLM intent or exact-string fallback) ---
+        if intent_name == "army_completed" or (
+            intent_name is None and lower == "army completed"
+        ):
             self._on_army_completed()
             return
 
-        # --- Model lookup ---
-        card = self._find_model(text.strip())
+        # --- Model lookup (Python stays authoritative over the LLM's value) ---
+        card = None
+        if intent_name == "add_model" and intent_value:
+            card = self._find_model(intent_value.strip())
+        if card is None:
+            card = self._find_model(text.strip())
         if card is None:
             self._say(
                 f"Model '{text}' was not found in the database. "

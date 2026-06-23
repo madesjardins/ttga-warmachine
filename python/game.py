@@ -34,6 +34,7 @@ if TYPE_CHECKING:
 from ttga.game_base import GameBase
 from ttga.game_dialog import GameDialog, ZoneRequirement
 from ttga.narration_engine import NarrationEngine
+from ttga.narration_service import NarrationService
 from ttga.qr_detection import QRDetector
 
 from .event_manager import GameEventManager
@@ -88,6 +89,7 @@ class WarmachineDialog(GameDialog):
         self._current_db: Optional[ModelDatabase] = None
         self._event_manager = event_manager
         self._match: Optional[Match] = None
+        self._narration_service: Optional[NarrationService] = None
         super().__init__(core, game_name, zone_requirements, parent)
 
         # Add extra tabs after base class has built the tab widget
@@ -394,11 +396,15 @@ class WarmachineDialog(GameDialog):
         narration_engine = NarrationEngine(
             llm_client=llm_client, persona=WARMACHINE_PERSONA
         )
+        # Run phrasing + intent parsing off the Qt thread, streaming narration
+        # to the narrator one sentence at a time so the UI stays responsive.
+        self._narration_service = NarrationService(narration_engine, narrator)
         self._match = Match(
             db=self._current_db,
             event_manager=self._event_manager,
             narrator=narrator,
             narration_engine=narration_engine,
+            narration_service=self._narration_service,
             parent=self,
         )
 
@@ -407,7 +413,8 @@ class WarmachineDialog(GameDialog):
         self._match.match_ended.connect(self._on_match_ended)
         self._match.log.line_added.connect(self._on_log_line)
 
-        # Wire army creation signals once the phase starts
+        # Wire phase-specific signals once each phase starts
+        self._match.phase_changed.connect(self._wire_setup)
         self._match.phase_changed.connect(self._wire_army_creation)
 
         # Update UI
@@ -433,6 +440,10 @@ class WarmachineDialog(GameDialog):
         if self._match is not None:
             self._match.stop()
             self._match = None
+
+        if self._narration_service is not None:
+            self._narration_service.shutdown()
+            self._narration_service = None
 
         self.game_instance.stop_game()
 
@@ -465,6 +476,13 @@ class WarmachineDialog(GameDialog):
     @QtCore.Slot(str)
     def _on_log_line(self, text: str) -> None:
         self.log_text.appendPlainText(text)
+
+    @QtCore.Slot(str)
+    def _wire_setup(self, phase_value: str) -> None:
+        """Connect setup-flow signals when the setup phase starts."""
+        if self._match is None or self._match.setup_flow is None:
+            return
+        self._match.setup_flow.status_changed.connect(self._on_ingame_status)
 
     @QtCore.Slot(str)
     def _wire_army_creation(self, phase_value: str) -> None:
