@@ -38,11 +38,12 @@ from ttga.narration_service import NarrationService
 from ttga.qr_detection import QRDetector
 
 from .event_manager import GameEventManager
-from .match import Match
+from .match import Match, MatchPhase
 from .model_database import ModelDatabase
 from .model_editor_dialog import ModelEditorDialog
 from .model_stat_card import BasicType, ModelStatCard
 from .persona import WARMACHINE_PERSONA
+from .setup_flow import SetupState
 
 _MODELS_DB_DIR = Path(__file__).parent.parent / "models_db"
 _MAX_LOG_DISPLAY_LINES = 100
@@ -90,6 +91,7 @@ class WarmachineDialog(GameDialog):
         self._event_manager = event_manager
         self._match: Optional[Match] = None
         self._narration_service: Optional[NarrationService] = None
+        self._narration_engine: Optional[NarrationEngine] = None
         super().__init__(core, game_name, zone_requirements, parent)
 
         # Add extra tabs after base class has built the tab widget
@@ -393,9 +395,28 @@ class WarmachineDialog(GameDialog):
         # step). When absent or unavailable, NarrationEngine falls back to the
         # scripted lines, so the game runs identically without an LLM.
         llm_client = getattr(core, "llm_client", None)
+        # Use the user-configured persona when set, otherwise the game default.
+        core_persona = getattr(core, "persona", "") or WARMACHINE_PERSONA
+        core_temp = getattr(core, "temperature", 0.7)
+        core_max_tokens = getattr(core, "max_tokens", 120)
         narration_engine = NarrationEngine(
-            llm_client=llm_client, persona=WARMACHINE_PERSONA
+            llm_client=llm_client,
+            persona=core_persona,
+            temperature=core_temp,
+            max_tokens=core_max_tokens,
         )
+        # Live-update the engine when the user changes the persona mid-game.
+        if hasattr(core, "persona_changed"):
+            core.persona_changed.connect(narration_engine.set_persona)
+        # Live-update temperature / max_tokens when the user changes them.
+        if hasattr(core, "narration_params_changed"):
+            core.narration_params_changed.connect(
+                lambda t, m: (
+                    narration_engine.set_temperature(t),
+                    narration_engine.set_max_tokens(m),
+                )
+            )
+        self._narration_engine = narration_engine
         # Run phrasing + intent parsing off the Qt thread, streaming narration
         # to the narrator one sentence at a time so the UI stays responsive.
         self._narration_service = NarrationService(narration_engine, narrator)
@@ -444,6 +465,20 @@ class WarmachineDialog(GameDialog):
         if self._narration_service is not None:
             self._narration_service.shutdown()
             self._narration_service = None
+
+        if self._narration_engine is not None:
+            core = self.game_instance.core
+            if hasattr(core, "persona_changed"):
+                try:
+                    core.persona_changed.disconnect(self._narration_engine.set_persona)
+                except (RuntimeError, TypeError):
+                    pass
+            if hasattr(core, "narration_params_changed"):
+                try:
+                    core.narration_params_changed.disconnect()
+                except (RuntimeError, TypeError):
+                    pass
+            self._narration_engine = None
 
         self.game_instance.stop_game()
 
@@ -908,6 +943,79 @@ class Game(GameBase):
     def on_speech_command(self, text: str) -> None:
         """Route recognised speech to the event manager."""
         self.event_manager.route_speech(text)
+
+    def get_help_context(self) -> dict:
+        """Return state-aware help context for the HelpAgent."""
+        if not self.is_running or self.dialog is None or self.dialog._match is None:
+            return {
+                "state": "menu",
+                "summary": (
+                    "Warmachine is loaded but no match is running. "
+                    "Open the game dialog and configure zones to start."
+                ),
+                "topics": {
+                    "start": "Click Start Game after mapping zones in the dialog.",
+                    "zones": "Configure zones in the zone mapping dialog.",
+                    "models": "Manage your model database via the Models tab.",
+                },
+            }
+
+        match = self.dialog._match
+        phase = match.phase
+
+        if phase is None or phase == MatchPhase.SETUP:
+            sf = match.setup_flow
+            if sf is not None and sf.state != SetupState.IDLE and sf.state != SetupState.DONE:
+                state_name = sf.state.name.lower()
+                summaries = {
+                    "game_mode": "The player is choosing a game mode.",
+                    "points": "The player is choosing the points value for the match.",
+                    "confirm": "The player is confirming the setup configuration.",
+                }
+                topics = {
+                    "game_mode": "Say 'single match' to choose a single-game format.",
+                    "points": "Say a number like '50 points' to set the army point value.",
+                    "cancel": "Say 'cancel' to abort the setup.",
+                    "repeat": "Say 'repeat' to hear the last prompt again.",
+                }
+                return {
+                    "state": f"setup_{state_name}",
+                    "summary": summaries.get(state_name, "The player is in the setup flow."),
+                    "current_options": ["single match", "cancel", "repeat"],
+                    "topics": topics,
+                }
+            return {
+                "state": "setup",
+                "summary": "The match is in the setup phase.",
+                "topics": {
+                    "game_mode": "Say 'single match' to choose a game format.",
+                    "cancel": "Say 'cancel' to abort the setup.",
+                },
+            }
+
+        if phase == MatchPhase.ARMY_CREATION:
+            ac = match.army_creation
+            player_label = "Player 1" if ac is not None and ac.current_player == 0 else "Player 2"
+            return {
+                "state": "army_creation",
+                "summary": (
+                    f"Army creation phase. {player_label} is building their army. "
+                    "The narrator is asking them to name a model to add."
+                ),
+                "current_options": ["say a model name", "army complete", "undo", "repeat"],
+                "topics": {
+                    "add_model": "Say the name of a model from the database to add it to your army.",
+                    "army_complete": "Say 'army complete' when you are finished adding models.",
+                    "undo": "Say 'undo' to remove the last model added.",
+                    "points": "Each model costs points. The army total must not exceed the agreed points limit.",
+                },
+            }
+
+        return {
+            "state": "unknown",
+            "summary": "A Warmachine match is in progress.",
+            "topics": {},
+        }
 
     def on_load(self) -> None:
         """Called when the game is loaded."""

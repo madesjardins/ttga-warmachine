@@ -161,6 +161,7 @@ class SetupFlow(QtCore.QObject):
         self._awaiting_intent: bool = False
         self._pending_text: str = ""
         self._intent_req_id: int = -1
+        self._service_connected: bool = False
 
     # ------------------------------------------------------------------
     # Properties
@@ -189,10 +190,12 @@ class SetupFlow(QtCore.QObject):
         if self._service is not None:
             self._service.narrated.connect(self._on_narrated)
             self._service.intent_parsed.connect(self._on_intent_parsed)
+            self._service_connected = True
         self._event_manager.push_speech_handler(self._on_speech)
         self._say(
             "Let us prepare for battle. Which game mode shall we play? "
-            "You can say single match."
+            "You can say single match.",
+            use_persona=True,
         )
         self.status_changed.emit("Setup: choose a game mode…")
 
@@ -204,29 +207,35 @@ class SetupFlow(QtCore.QObject):
         self._state = SetupState.DONE
 
     def _disconnect_service(self) -> None:
-        if self._service is not None:
+        if self._service is not None and self._service_connected:
             try:
                 self._service.narrated.disconnect(self._on_narrated)
                 self._service.intent_parsed.disconnect(self._on_intent_parsed)
             except (RuntimeError, TypeError):
                 pass
+            self._service_connected = False
 
     # ------------------------------------------------------------------
     # Narrator helper
     # ------------------------------------------------------------------
 
-    def _say(self, text: str) -> None:
-        """Speak *text*, rephrasing in-character when an LLM is available.
+    def _say(self, text: str, *, use_persona: bool = False) -> None:
+        """Speak *text*, rephrasing in-character when *use_persona* is True.
 
         With a :class:`NarrationService`, phrasing and TTS run off the main
         thread and logging happens when ``narrated`` fires. Otherwise this is
         the synchronous phrase/log/play path with ``text`` as the fallback.
+
+        Args:
+            text: The text to speak.
+            use_persona: When True, rephrase via the LLM persona. When False
+                (default), speak the text verbatim.
         """
         if self._service is not None:
-            self._service.speak(text)
+            self._service.speak(text, use_persona=use_persona)
             return
         spoken = text
-        if self._narration is not None:
+        if use_persona and self._narration is not None:
             spoken = self._narration.phrase(text)
         self._log.narrate(spoken)
         if self._narrator is not None:
@@ -341,7 +350,8 @@ class SetupFlow(QtCore.QObject):
         self._state = SetupState.POINTS
         self._say(
             f"Single match it is. How many points shall each army field? "
-            f"For example, fifty or seventy five."
+            f"For example, fifty or seventy five.",
+            use_persona=True,
         )
         self.status_changed.emit("Setup: choose army points…")
 
@@ -369,7 +379,8 @@ class SetupFlow(QtCore.QObject):
         self._state = SetupState.CONFIRM
         self._say(
             f"A single match at {points} points. Shall we begin? "
-            f"Say yes to start, or restart to change the settings."
+            f"Say yes to start, or restart to change the settings.",
+            use_persona=True,
         )
         self.status_changed.emit("Setup: confirm to begin…")
 
@@ -389,7 +400,8 @@ class SetupFlow(QtCore.QObject):
             self._points = None
             self._say(
                 "Very well, let us start over. Which game mode shall we play? "
-                "You can say single match."
+                "You can say single match.",
+                use_persona=True,
             )
             self.status_changed.emit("Setup: choose a game mode…")
             return

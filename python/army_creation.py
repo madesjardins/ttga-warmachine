@@ -93,6 +93,7 @@ class ArmyCreation(QtCore.QObject):
         self._awaiting_intent: bool = False
         self._pending_text: str = ""
         self._intent_req_id: int = -1
+        self._service_connected: bool = False
         self._armies: list[list[ModelStatCard]] = [[], []]
         # QR codes assigned to each army entry, parallel to ``_armies``.
         self._qr_codes: list[list[list[str]]] = [[], []]
@@ -142,8 +143,9 @@ class ArmyCreation(QtCore.QObject):
         if self._service is not None:
             self._service.narrated.connect(self._on_narrated)
             self._service.intent_parsed.connect(self._on_intent_parsed)
+            self._service_connected = True
         self._event_manager.push_speech_handler(self._on_speech)
-        self._say("Army creation begins.")
+        self._say("Army creation begins.", use_persona=True)
         self._prompt_next_model()
 
     def stop(self) -> None:
@@ -152,33 +154,39 @@ class ArmyCreation(QtCore.QObject):
         if self._collecting:
             self._event_manager.pop_detection_handler(self._on_detection)
             self._collecting = False
-        if self._service is not None:
+        if self._service is not None and self._service_connected:
             try:
                 self._service.narrated.disconnect(self._on_narrated)
                 self._service.intent_parsed.disconnect(self._on_intent_parsed)
             except (RuntimeError, TypeError):
                 pass
+            self._service_connected = False
         self._event_manager.pop_speech_handler(self._on_speech)
 
     # ------------------------------------------------------------------
     # Narrator helper
     # ------------------------------------------------------------------
 
-    def _say(self, text: str) -> None:
-        """Speak *text*, rephrasing in-character when an LLM is available.
+    def _say(self, text: str, *, use_persona: bool = False) -> None:
+        """Speak *text*, rephrasing in-character when *use_persona* is True.
 
         With a :class:`NarrationService`, phrasing and TTS run off the main
         thread (streamed sentence by sentence) and logging happens when the
         :attr:`NarrationService.narrated` signal fires. Otherwise this performs
         the synchronous phrase/log/play path, with the scripted ``text`` as the
         fallback.
+
+        Args:
+            text: The text to speak.
+            use_persona: When True, rephrase via the LLM persona. When False
+                (default), speak the text verbatim.
         """
         if self._service is not None:
-            self._service.speak(text)
+            self._service.speak(text, use_persona=use_persona)
             return
 
         spoken = text
-        if self._narration is not None:
+        if use_persona and self._narration is not None:
             spoken = self._narration.phrase(text)
         self._log.narrate(spoken)
         if self._narrator is not None:
@@ -210,7 +218,7 @@ class ArmyCreation(QtCore.QObject):
             text = (
                 f"{player_label}, speak the name of the next model or unit."
             )
-        self._say(text)
+        self._say(text, use_persona=True)
         self.status_changed.emit(f"Waiting for {player_label}…")
 
     # ------------------------------------------------------------------
@@ -471,7 +479,8 @@ class ArmyCreation(QtCore.QObject):
         count = len(self._armies[self._current_player])
         self._say(
             f"{player_label}'s army is complete with {count} "
-            f"{'entry' if count == 1 else 'entries'}."
+            f"{'entry' if count == 1 else 'entries'}.",
+            use_persona=True,
         )
 
         if self._current_player == 0:
@@ -479,7 +488,8 @@ class ArmyCreation(QtCore.QObject):
             self._prompt_next_model()
         else:
             self._say(
-                "Both armies are now complete. Army creation is finished."
+                "Both armies are now complete. Army creation is finished.",
+                use_persona=True,
             )
             self._active = False
             self._event_manager.pop_speech_handler(self._on_speech)
