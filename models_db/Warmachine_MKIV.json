@@ -148,7 +148,9 @@
       "special_actions": [],
       "special_attacks": [],
       "spells": [],
-      "special_rules": [],
+      "special_rules": [
+        "Quick Work"
+      ],
       "melee_weapons": [
         {
           "weapon_type": "melee",

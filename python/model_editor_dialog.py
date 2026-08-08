@@ -57,6 +57,10 @@ from .weapon import (
     WeaponLocation,
     WeaponQuality,
 )
+from .model_special_rule import (
+    all_rule_names as all_model_special_rule_names,
+    model_special_rule_from_name,
+)
 from .weapon_special_rule import (
     all_rule_names,
     weapon_special_rule_from_name,
@@ -206,11 +210,14 @@ class TagInputWidget(QtWidgets.QFrame):
         chips_scroll = QtWidgets.QScrollArea()
         chips_scroll.setWidget(self._chips_container)
         chips_scroll.setWidgetResizable(True)
-        chips_scroll.setFixedHeight(66)
+        chips_scroll.setMinimumHeight(66)
+        chips_scroll.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
+        )
         chips_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         chips_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         chips_scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
-        root.addWidget(chips_scroll)
+        root.addWidget(chips_scroll, 1)
 
         self._search = QtWidgets.QLineEdit()
         self._search.setPlaceholderText("Type to filter…")
@@ -1260,10 +1267,15 @@ class ModelEditorDialog(QtWidgets.QDialog):
     def _create_special_rules_tab(self) -> QtWidgets.QWidget:
         widget = QtWidgets.QWidget()
         h = QtWidgets.QHBoxLayout(widget)
-        self.special_rules_list, pnl1 = self._make_string_list_editor("Special Rules")
+
+        rules_grp = QtWidgets.QGroupBox("Special Rules")
+        rules_v = QtWidgets.QVBoxLayout(rules_grp)
+        self.special_rules_tag = TagInputWidget(str_values=all_model_special_rule_names())
+        rules_v.addWidget(self.special_rules_tag)
+
         self.special_actions_list, pnl2 = self._make_string_list_editor("Special Actions")
         self.special_attacks_list, pnl3 = self._make_string_list_editor("Special Attacks")
-        h.addWidget(pnl1)
+        h.addWidget(rules_grp)
         h.addWidget(pnl2)
         h.addWidget(pnl3)
         return widget
@@ -1497,7 +1509,7 @@ class ModelEditorDialog(QtWidgets.QDialog):
 
         self._set_damage_system(card.damage_system_type, card.damage_system)
 
-        self._load_string_list(self.special_rules_list, card.special_rules)
+        self.special_rules_tag.set_values([r.name for r in card.special_rules])
         self._load_string_list(self.special_actions_list, card.special_actions)
         self._load_string_list(self.special_attacks_list, card.special_attacks)
 
@@ -1534,7 +1546,7 @@ class ModelEditorDialog(QtWidgets.QDialog):
         self._right_grid_data = None
         self._update_grid_summary()
         self._update_stat_visibility()
-        self.special_rules_list.clear()
+        self.special_rules_tag.clear()
         self.special_actions_list.clear()
         self.special_attacks_list.clear()
         self.feat_edit.clear()
@@ -1614,7 +1626,9 @@ class ModelEditorDialog(QtWidgets.QDialog):
                 model_resistances=[
                     r for r, cb in self._resistance_cbs.items() if cb.isChecked()
                 ],
-                special_rules=self._list_widget_strings(self.special_rules_list),
+                special_rules=[
+                    model_special_rule_from_name(v) for v in self.special_rules_tag.selected_values()
+                ],
                 special_actions=self._list_widget_strings(self.special_actions_list),
                 special_attacks=self._list_widget_strings(self.special_attacks_list),
                 feat=self.feat_edit.text(),
@@ -1646,11 +1660,11 @@ class ModelEditorDialog(QtWidgets.QDialog):
         self.feat_edit.textChanged.connect(self._mark_dirty)
         for spin in self._stat_spins.values():
             spin.valueChanged.connect(self._mark_dirty)
-        for tag in (self.armies_tag, self.keywords_tag, self.advantages_tag):
+        for tag in (self.armies_tag, self.keywords_tag, self.advantages_tag, self.special_rules_tag):
             tag.changed.connect(self._mark_dirty)
         for cb in self._resistance_cbs.values():
             cb.stateChanged.connect(self._mark_dirty)
-        for lst in (self.vocal_list, self.special_rules_list,
+        for lst in (self.vocal_list,
                     self.special_actions_list, self.special_attacks_list,
                     self.spells_list):
             lst.model().rowsInserted.connect(self._mark_dirty)
