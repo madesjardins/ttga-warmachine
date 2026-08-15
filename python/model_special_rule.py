@@ -16,8 +16,11 @@
 
 Defines the :class:`ModelSpecialRule` base class, its supporting enums and
 value types (:class:`Timing`, :class:`GrantScope`, :class:`ActionType`,
-:class:`StatBonus`, :class:`AdditionalAction`,
-:class:`ModelSpecialRuleEffect`), and all concrete rule implementations.
+:class:`AuraTarget`, :class:`StatBonus`, :class:`AuraEffect`,
+:class:`AdditionalAction`, :class:`ModelSpecialRuleEffect`), and all
+concrete rule implementations. The :class:`~.weapon_special_rule.Duration`
+enum is reused as-is from :mod:`weapon_special_rule` for effects that last
+a fixed game duration (e.g. "for one round").
 
 Design notes
 ------------
@@ -61,6 +64,16 @@ Bracketed values such as ``Ionization [X]`` or ``Reposition [X]`` are
 represented by the instance attribute :attr:`~ModelSpecialRule.argument`,
 left ``None`` on the class and set per model card to the resolved value.
 
+Some rules project a continuous effect onto *other* models within a fixed
+radius rather than modifying their own stats (e.g. Telemetry, Master of
+Ruin, Entropic Force). These are represented by :class:`AuraEffect` (with
+an :class:`AuraTarget` selecting which other models are affected) stored
+in :attr:`ModelSpecialRuleEffect.aura`, combined with the aura's radius on
+:attr:`~ModelSpecialRule.radius`. That same ``radius`` attribute is also
+reused more loosely for the fixed proximity distance referenced by a
+triggered (non-continuous) rule's condition (e.g. Self-Sacrifice's 3"),
+not just for continuous auras.
+
 Adding a new rule
 ------------------
 1. Subclass :class:`ModelSpecialRule`, set the ``name`` class attribute, and
@@ -80,6 +93,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
+from .weapon_special_rule import Duration
+
 
 # ---------------------------------------------------------------------------
 # Enums
@@ -92,12 +107,20 @@ class Timing(str, Enum):
     """
 
     CONTINUOUS = "Continuous"
+    ON_MELEE_ATTACK = "On Melee Attack"
     ON_MELEE_ATTACK_DESTROYS_MODEL = "On Melee Attack Destroys Model"
     ON_MODEL_DESTROYED = "On Model Destroyed"
+    ON_MODEL_DISABLED = "On Model Disabled"
+    ON_REMOVED_FROM_PLAY = "On Removed From Play"
     ON_ATTACK_MISSED_SELF = "On Attack Missed Self"
     ON_DAMAGE_ROLL = "On Damage Roll"
+    ON_DAMAGE_ROLL_AGAINST_SELF = "On Damage Roll Against Self"
     REPLACES_DAMAGE_ROLL = "Replaces Damage Roll"
     ON_COMBINED_ATTACK_MISSED = "On Combined Attack Missed"
+    ON_CHARGE = "On Charge"
+    ON_SPELL_CAST = "On Spell Cast"
+    ON_ENEMY_ENTERS_MELEE_RANGE = "On Enemy Enters Melee Range"
+    ON_FRIENDLY_MODEL_HIT_BY_RANGED_ATTACK = "On Friendly Model Hit By Ranged Attack"
     START_OF_MAINTENANCE_PHASE = "Start Of Maintenance Phase"
     END_OF_ACTIVATION = "End Of Activation"
     AFTER_ADVANCE_BEFORE_COMBAT_ACTION = "After Advance Before Combat Action"
@@ -123,10 +146,19 @@ class ActionType(str, Enum):
 
     BASIC_MELEE_ATTACK = "Basic Melee Attack"
     BASIC_RANGED_ATTACK = "Basic Ranged Attack"
+    MAGIC_ABILITY = "Magic Ability"
     ADVANCE = "Advance"
     FULL_ADVANCE = "Full Advance"
     PLACEMENT = "Placement"
     VENGEANCE_MOVE = "Vengeance Move"
+
+
+class AuraTarget(str, Enum):
+    """Which other models are affected by an :class:`AuraEffect`."""
+
+    ENEMIES = "Enemies"
+    FRIENDLY = "Friendly"
+    ALL_OTHERS = "All Others"
 
 
 # ---------------------------------------------------------------------------
@@ -142,9 +174,17 @@ class StatBonus:
     Attributes:
         def_bonus: Bonus applied to this model's DEF.
         arm_bonus: Bonus applied to this model's ARM.
+        spd_bonus: Bonus applied to this model's SPD.
         attack_roll_bonus: Bonus (or penalty, if negative) applied to attack
             rolls. Combined with :attr:`against_attacker` to determine
             whose roll it applies to.
+        damage_roll_bonus: Bonus (or penalty, if negative) applied to damage
+            rolls made by this model.
+        attack_roll_extra_dice: Extra dice added to this model's attack
+            rolls (the specific keep/discard rule, e.g. "discard the
+            lowest", is left to the docstring).
+        damage_roll_extra_dice: Extra dice added to this model's damage
+            rolls.
         against_attacker: If ``True``, ``attack_roll_bonus`` applies to
             rolls made by the *attacker* targeting this model, rather than
             to a roll made by this model (e.g. Set Defense's penalty to
@@ -153,18 +193,55 @@ class StatBonus:
         melee_only: Restrict the bonus to melee attacks.
         charge_or_slam_only: Restrict the bonus to charge or slam power
             attacks.
+        arcane_attack_only: Restrict the bonus to arcane attacks.
         immune_to_knockdown: If ``True``, this model cannot be knocked down
             while the condition holds.
     """
 
     def_bonus: int = 0
     arm_bonus: int = 0
+    spd_bonus: int = 0
     attack_roll_bonus: int = 0
+    damage_roll_bonus: int = 0
+    attack_roll_extra_dice: int = 0
+    damage_roll_extra_dice: int = 0
     against_attacker: bool = False
     ranged_only: bool = False
     melee_only: bool = False
     charge_or_slam_only: bool = False
+    arcane_attack_only: bool = False
     immune_to_knockdown: bool = False
+
+
+@dataclass
+class AuraEffect:
+    """A continuous effect this model projects onto other models within
+    :attr:`ModelSpecialRule.radius` inches of it.
+
+    Attributes:
+        target: Which other models are affected.
+        arm_bonus: ARM modifier applied to affected models (negative for a
+            penalty, e.g. Master of Ruin).
+        attack_roll_bonus: Attack roll modifier applied to affected models'
+            attack rolls (e.g. Telemetry).
+        arcane_attack_only: Restrict ``attack_roll_bonus`` to arcane
+            attacks.
+        target_must_be_in_radius_too: If ``True``, ``attack_roll_bonus``
+            only applies when the model being attacked is also within
+            radius of this model (e.g. Telemetry's "against enemy models
+            within 8\"").
+        loses_tough: If ``True``, affected models lose Tough.
+        cannot_remove_damage: If ``True``, affected models cannot have
+            damage removed from them.
+    """
+
+    target: AuraTarget = AuraTarget.ENEMIES
+    arm_bonus: int = 0
+    attack_roll_bonus: int = 0
+    arcane_attack_only: bool = False
+    target_must_be_in_radius_too: bool = False
+    loses_tough: bool = False
+    cannot_remove_damage: bool = False
 
 
 @dataclass
@@ -211,18 +288,25 @@ class ModelSpecialRuleEffect:
             effects), or descriptive text for effects that don't cleanly
             map onto the structured fields below.
         stat_bonus: Stat / roll modifier granted by this effect, if any.
+        aura: Effect this model projects onto other models within
+            :attr:`ModelSpecialRule.radius` inches of it, if any.
         additional_action: Extra action granted by this effect, if any.
         grants: Names of other special rules, advantages, or resistances
             granted to this model while this effect applies. Resolved by
             name against the relevant registries by the caller.
+        duration: How long this effect lasts once triggered (e.g. "for one
+            round"), or ``None`` if not applicable (continuous effects, or
+            effects that resolve immediately with no lingering duration).
     """
 
     timing: Timing = Timing.CONTINUOUS
     trigger: str = ""
     condition: str = ""
     stat_bonus: Optional[StatBonus] = None
+    aura: Optional[AuraEffect] = None
     additional_action: Optional[AdditionalAction] = None
     grants: tuple[str, ...] = ()
+    duration: Optional[Duration] = None
 
 
 # ---------------------------------------------------------------------------
@@ -240,8 +324,10 @@ class ModelSpecialRule:
             rule's name (e.g. the distance for ``Ionization [X]``). ``None``
             on the class; set per instance to the value used by a specific
             model.
-        radius: Fixed aura radius in inches for continuous, distance-based
-            effects (e.g. Tactician's 10"). ``None`` if not applicable.
+        radius: Fixed radius in inches associated with this rule's effect —
+            either a continuous aura radius (e.g. Tactician's 10") or the
+            proximity distance referenced by a triggered effect's condition
+            (e.g. Self-Sacrifice's 3"). ``None`` if not applicable.
         grant_scope: How this rule's benefit is shared. Defaults to
             :attr:`GrantScope.SELF` (the model itself has the rule).
             Reconfigure per instance to represent a "Granted:", "Drive:",
@@ -345,6 +431,7 @@ class TakeUp(ModelSpecialRule):
     """
 
     name = "Take Up"
+    radius = 1.0
     effects = (
         ModelSpecialRuleEffect(
             timing=Timing.ON_MODEL_DESTROYED,
@@ -493,6 +580,7 @@ class RighteousVengeance(ModelSpecialRule):
     """
 
     name = "Righteous Vengeance"
+    radius = 5.0
     effects = (
         ModelSpecialRuleEffect(
             timing=Timing.START_OF_MAINTENANCE_PHASE,
@@ -673,6 +761,45 @@ class Repairable(ModelSpecialRule):
     )
 
 
+class BattleWizard(ModelSpecialRule):
+    """Battle Wizard.
+
+    Once per turn, when this model destroys or removes from play one or
+    more enemy models with a melee attack during its activation,
+    immediately after the attack is resolved it can make one Magic Ability
+    special attack or special action.
+    """
+
+    name = "Battle Wizard"
+    effects = (
+        ModelSpecialRuleEffect(
+            timing=Timing.ON_MELEE_ATTACK_DESTROYS_MODEL,
+            trigger="Destroys or removes from play one or more enemy models with a melee attack during its activation",
+            additional_action=AdditionalAction(
+                action_type=ActionType.MAGIC_ABILITY, max_per_turn=1
+            ),
+        ),
+    )
+
+
+class Gang(ModelSpecialRule):
+    """Gang.
+
+    When making a melee attack targeting an enemy model in the melee range
+    of another model in this unit, this model gains +2 to melee attack and
+    melee damage rolls.
+    """
+
+    name = "Gang"
+    effects = (
+        ModelSpecialRuleEffect(
+            timing=Timing.ON_MELEE_ATTACK,
+            condition="Targeting an enemy model in the melee range of another model in this unit",
+            stat_bonus=StatBonus(attack_roll_bonus=2, damage_roll_bonus=2, melee_only=True),
+        ),
+    )
+
+
 class ExtendedFire(ModelSpecialRule):
     """Extended Fire.
 
@@ -688,6 +815,385 @@ class ExtendedFire(ModelSpecialRule):
             trigger="At any time during its unit's activation",
             condition="Ranged weapons of models in this unit gain Snipe this activation",
             grants=("Snipe",),
+        ),
+    )
+
+
+class MarkedSoul(ModelSpecialRule):
+    """Marked Soul.
+
+    This model is a Marked Soul.
+    """
+
+    name = "Marked Soul"
+    effects = (
+        ModelSpecialRuleEffect(
+            timing=Timing.CONTINUOUS,
+            condition="This model is a Marked Soul",
+        ),
+    )
+
+
+class WillingVessel(ModelSpecialRule):
+    """Willing Vessel.
+
+    When an infernal master summons a horror and chooses this model to
+    remove from play, the infernal master does not need to spend any
+    essence points to summon the horror.
+    """
+
+    name = "Willing Vessel"
+    effects = (
+        ModelSpecialRuleEffect(
+            timing=Timing.ON_REMOVED_FROM_PLAY,
+            trigger="Chosen by an infernal master to be removed from play to summon a horror",
+            condition="The infernal master does not need to spend any essence points to summon the horror",
+        ),
+    )
+
+
+class ArcanePulse(ModelSpecialRule):
+    """Arcane Pulse.
+
+    When this model is destroyed by an enemy attack, enemy upkeep spells on
+    models within 8" of it expire.
+    """
+
+    name = "Arcane Pulse"
+    radius = 8.0
+    effects = (
+        ModelSpecialRuleEffect(
+            timing=Timing.ON_MODEL_DESTROYED,
+            trigger="Destroyed by an enemy attack",
+            condition='Enemy upkeep spells on models within 8" of it expire',
+        ),
+    )
+
+
+class DarkPower(ModelSpecialRule):
+    """Dark Power.
+
+    This model gains an additional die on arcane attack and arcane attack
+    damage rolls. Discard the lowest die in each roll.
+    """
+
+    name = "Dark Power"
+    effects = (
+        ModelSpecialRuleEffect(
+            timing=Timing.CONTINUOUS,
+            condition="Discard the lowest die in each roll",
+            stat_bonus=StatBonus(
+                attack_roll_extra_dice=1, damage_roll_extra_dice=1, arcane_attack_only=True
+            ),
+        ),
+    )
+
+
+class GateWalker(ModelSpecialRule):
+    """Gate Walker.
+
+    Once per activation, immediately after this model casts a spell, you
+    can place this model anywhere completely within 5" of its current
+    location.
+    """
+
+    name = "Gate Walker"
+    effects = (
+        ModelSpecialRuleEffect(
+            timing=Timing.ON_SPELL_CAST,
+            trigger="Immediately after this model casts a spell",
+            additional_action=AdditionalAction(
+                action_type=ActionType.PLACEMENT, max_distance=5.0, max_per_activation=1
+            ),
+        ),
+    )
+
+
+class AncientShroud(ModelSpecialRule):
+    """Ancient Shroud.
+
+    When a damage roll against this model exceeds its ARM, it suffers 1
+    damage point instead of the total rolled.
+    """
+
+    name = "Ancient Shroud"
+    effects = (
+        ModelSpecialRuleEffect(
+            timing=Timing.ON_DAMAGE_ROLL_AGAINST_SELF,
+            trigger="A damage roll against this model exceeds its ARM",
+            condition="Suffers 1 damage point instead of the total rolled",
+        ),
+    )
+
+
+class DarkProphecy(ModelSpecialRule):
+    """Dark Prophecy.
+
+    When this model is destroyed by an enemy attack, enemy models within 8"
+    lose their essence points and cannot cast spells, channel spells, or be
+    forced for one round.
+    """
+
+    name = "Dark Prophecy"
+    radius = 8.0
+    effects = (
+        ModelSpecialRuleEffect(
+            timing=Timing.ON_MODEL_DESTROYED,
+            trigger="Destroyed by an enemy attack",
+            condition='Enemy models within 8" lose their essence points and cannot cast spells, channel spells, or be forced',
+            duration=Duration.ROUND,
+        ),
+    )
+
+
+class Telemetry(ModelSpecialRule):
+    """Telemetry.
+
+    Other friendly models gain +2 to arcane attack rolls against enemy
+    models within 8" of this model.
+    """
+
+    name = "Telemetry"
+    radius = 8.0
+    effects = (
+        ModelSpecialRuleEffect(
+            timing=Timing.CONTINUOUS,
+            aura=AuraEffect(
+                target=AuraTarget.FRIENDLY,
+                attack_roll_bonus=2,
+                arcane_attack_only=True,
+                target_must_be_in_radius_too=True,
+            ),
+        ),
+    )
+
+
+class MasterOfRuin(ModelSpecialRule):
+    """Master of Ruin.
+
+    Other models suffer -2 ARM while within 5" of this model.
+    """
+
+    name = "Master of Ruin"
+    radius = 5.0
+    effects = (
+        ModelSpecialRuleEffect(
+            timing=Timing.CONTINUOUS,
+            aura=AuraEffect(target=AuraTarget.ALL_OTHERS, arm_bonus=-2),
+        ),
+    )
+
+
+class Acrobatics(ModelSpecialRule):
+    """Acrobatics.
+
+    This model can advance through other models if it has enough movement
+    to move completely past their bases. This model ignores intervening
+    models when declaring its charge target.
+    """
+
+    name = "Acrobatics"
+    effects = (
+        ModelSpecialRuleEffect(
+            timing=Timing.CONTINUOUS,
+            condition=(
+                "Can advance through other models if it has enough movement "
+                "to move completely past their bases; ignores intervening "
+                "models when declaring its charge target"
+            ),
+        ),
+    )
+
+
+class RunAndGun(ModelSpecialRule):
+    """Run & Gun.
+
+    At the end of its activation, if this model destroyed one or more
+    enemy models with a ranged attack that activation, it can make a full
+    advance.
+    """
+
+    name = "Run & Gun"
+    effects = (
+        ModelSpecialRuleEffect(
+            timing=Timing.END_OF_ACTIVATION,
+            trigger="Destroyed one or more enemy models with a ranged attack this activation",
+            additional_action=AdditionalAction(action_type=ActionType.FULL_ADVANCE),
+        ),
+    )
+
+
+class EntropicForce(ModelSpecialRule):
+    """Entropic Force.
+
+    While within 5" of this model, enemy models lose Tough and cannot have
+    damage removed from them.
+    """
+
+    name = "Entropic Force"
+    radius = 5.0
+    effects = (
+        ModelSpecialRuleEffect(
+            timing=Timing.CONTINUOUS,
+            aura=AuraEffect(
+                target=AuraTarget.ENEMIES, loses_tough=True, cannot_remove_damage=True
+            ),
+        ),
+    )
+
+
+class DefensiveStrike(ModelSpecialRule):
+    """Defensive Strike.
+
+    Once per turn, when an enemy model advances into and ends its movement
+    or is placed in this model's melee range, this model can immediately
+    make one basic melee attack against it.
+    """
+
+    name = "Defensive Strike"
+    effects = (
+        ModelSpecialRuleEffect(
+            timing=Timing.ON_ENEMY_ENTERS_MELEE_RANGE,
+            trigger="An enemy model advances into and ends its movement, or is placed, in this model's melee range",
+            additional_action=AdditionalAction(
+                action_type=ActionType.BASIC_MELEE_ATTACK,
+                target="that model",
+                max_per_turn=1,
+            ),
+        ),
+    )
+
+
+class Ghostly(ModelSpecialRule):
+    """Ghostly.
+
+    This model can advance through terrain and obstacles without penalty
+    and can advance through obstructions and models if it has enough
+    movement to move completely past them.
+    """
+
+    name = "Ghostly"
+    effects = (
+        ModelSpecialRuleEffect(
+            timing=Timing.CONTINUOUS,
+            condition=(
+                "Can advance through terrain and obstacles without penalty "
+                "and can advance through obstructions and models if it has "
+                "enough movement to move completely past them"
+            ),
+        ),
+    )
+
+
+class ShadowGuardian(ModelSpecialRule):
+    """Shadow Guardian.
+
+    You can choose not to deploy this model at the start of the game. If it
+    is not deployed normally, you can put it into play when a friendly
+    non-Umbral Faction model is directly hit by an enemy ranged attack.
+    Place this model completely within 3" of the hit model. This model is
+    automatically hit by the ranged attack instead and suffers all damage
+    and effects.
+    """
+
+    name = "Shadow Guardian"
+    radius = 3.0
+    effects = (
+        ModelSpecialRuleEffect(
+            timing=Timing.ON_FRIENDLY_MODEL_HIT_BY_RANGED_ATTACK,
+            trigger="A friendly non-Umbral Faction model is directly hit by an enemy ranged attack while this model has not been deployed",
+            condition="This model is automatically hit by the ranged attack instead and suffers all damage and effects",
+            additional_action=AdditionalAction(
+                action_type=ActionType.PLACEMENT, max_distance=3.0
+            ),
+        ),
+    )
+
+
+class ShieldGuard(ModelSpecialRule):
+    """Shield Guard.
+
+    When a friendly model is directly hit by a non-spray ranged attack
+    while within 3" of a model with Shield Guard, you can choose to have
+    the model with Shield Guard be directly hit instead. That model is
+    automatically hit and suffers all damage and effects. A model can use
+    Shield Guard only once per round and cannot use Shield Guard if it is
+    incorporeal, knocked down, or stationary. Shield Guard can only be used
+    once per attack.
+    """
+
+    name = "Shield Guard"
+    radius = 3.0
+    effects = (
+        ModelSpecialRuleEffect(
+            timing=Timing.ON_FRIENDLY_MODEL_HIT_BY_RANGED_ATTACK,
+            trigger='A friendly model is directly hit by a non-spray ranged attack while within 3" of this model',
+            condition=(
+                "This model is automatically hit instead and suffers all "
+                "damage and effects; usable only once per round, once per "
+                "attack, and not while incorporeal, knocked down, or "
+                "stationary"
+            ),
+        ),
+    )
+
+
+class Bloodthirst(ModelSpecialRule):
+    """Bloodthirst.
+
+    When it charges a living or undead model, this model gains +2 SPD.
+    """
+
+    name = "Bloodthirst"
+    effects = (
+        ModelSpecialRuleEffect(
+            timing=Timing.ON_CHARGE,
+            trigger="Charges a living or undead model",
+            stat_bonus=StatBonus(spd_bonus=2),
+        ),
+    )
+
+
+class Vengeance(ModelSpecialRule):
+    """Vengeance.
+
+    During your Maintenance Phase, if one or more models in this unit were
+    damaged by enemy attacks during the last round, each model in the unit
+    can make a Vengeance Move. Each model making a Vengeance Move can
+    advance 3". After all models in the unit have moved, each model can
+    then make one basic melee attack. A model can only make one Vengeance
+    Move each turn.
+    """
+
+    name = "Vengeance"
+    effects = (
+        ModelSpecialRuleEffect(
+            timing=Timing.START_OF_MAINTENANCE_PHASE,
+            trigger="One or more models in this unit were damaged by enemy attacks during the last round",
+            additional_action=AdditionalAction(
+                action_type=ActionType.VENGEANCE_MOVE,
+                max_distance=3.0,
+                max_per_turn=1,
+            ),
+        ),
+    )
+
+
+class SelfSacrifice(ModelSpecialRule):
+    """Self-Sacrifice.
+
+    When this model is disabled by an enemy attack, you can choose a
+    non-disabled model in its unit within 3" of this model to be destroyed
+    instead and this model removes 1 damage point.
+    """
+
+    name = "Self-Sacrifice"
+    radius = 3.0
+    effects = (
+        ModelSpecialRuleEffect(
+            timing=Timing.ON_MODEL_DISABLED,
+            trigger="Disabled by an enemy attack",
+            condition='A non-disabled model in its unit within 3" of this model can be destroyed instead; this model removes 1 damage point',
         ),
     )
 
@@ -720,6 +1226,27 @@ _RULE_CLASSES: list[type[ModelSpecialRule]] = [
     CombinedArms,
     Repairable,
     ExtendedFire,
+    BattleWizard,
+    Gang,
+    MarkedSoul,
+    WillingVessel,
+    ArcanePulse,
+    DarkPower,
+    GateWalker,
+    AncientShroud,
+    DarkProphecy,
+    Telemetry,
+    MasterOfRuin,
+    Acrobatics,
+    RunAndGun,
+    EntropicForce,
+    DefensiveStrike,
+    Ghostly,
+    ShadowGuardian,
+    ShieldGuard,
+    Bloodthirst,
+    Vengeance,
+    SelfSacrifice,
 ]
 
 _REGISTRY: dict[str, type[ModelSpecialRule]] = {

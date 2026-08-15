@@ -30,6 +30,7 @@ from .damage_system import (
     DamageSystemType,
     damage_system_from_dict,
 )
+from .model_special_attack import ModelSpecialAttack, model_special_attack_from_name
 from .model_special_rule import ModelSpecialRule, model_special_rule_from_name
 from .weapon import Hardpoint, MeleeWeapon, RangeWeapon
 
@@ -313,7 +314,7 @@ class ModelStatCard:
         model_resistances: Damage type resistances.
         feat: Feat description text (empty string if none).
         special_actions: Special action descriptions.
-        special_attacks: Special attack descriptions.
+        special_attacks: Model special attacks.
         spells: Spell descriptions.
         special_rules: Model special rules.
         melee_weapons: Melee weapons carried by the model.
@@ -340,7 +341,7 @@ class ModelStatCard:
     model_resistances: list[ModelResistance] = field(default_factory=list)
     feat: str = ""
     special_actions: list[str] = field(default_factory=list)
-    special_attacks: list[str] = field(default_factory=list)
+    special_attacks: list[ModelSpecialAttack] = field(default_factory=list)
     spells: list[str] = field(default_factory=list)
     special_rules: list[ModelSpecialRule] = field(default_factory=list)
     melee_weapons: list[MeleeWeapon] = field(default_factory=list)
@@ -404,7 +405,7 @@ class ModelStatCard:
             "model_resistances": [r.value for r in self.model_resistances],
             "feat": self.feat,
             "special_actions": list(self.special_actions),
-            "special_attacks": list(self.special_attacks),
+            "special_attacks": [a.name for a in self.special_attacks],
             "spells": list(self.spells),
             "special_rules": [r.name for r in self.special_rules],
             "melee_weapons": [w.to_dict() for w in self.melee_weapons],
@@ -449,7 +450,9 @@ class ModelStatCard:
             model_resistances=[ModelResistance(r) for r in data.get("model_resistances", [])],
             feat=str(data.get("feat", "")),
             special_actions=list(data.get("special_actions", [])),
-            special_attacks=list(data.get("special_attacks", [])),
+            special_attacks=[
+                model_special_attack_from_name(a) for a in data.get("special_attacks", [])
+            ],
             spells=list(data.get("spells", [])),
             special_rules=[model_special_rule_from_name(r) for r in data.get("special_rules", [])],
             melee_weapons=[
