@@ -65,6 +65,23 @@ from __future__ import annotations
 
 from typing import Optional
 
+from .rule_primitives import (
+    ActionType,
+    AdditionalAction,
+    EffectScope,
+    ModelFilter as MF,
+    Relationship,
+    Resource,
+    ResourceChange,
+    Restriction,
+    RestrictionSpec,
+    RollModifier as RM,
+    RollType,
+    RollModKind,
+    RuleEffect,
+    ScopeKind,
+    UsageLimit,
+)
 from .weapon_special_rule import Duration
 
 
@@ -95,13 +112,33 @@ class ModelSpecialAttack:
             ``POW X/Y`` attack), or ``None`` if not applicable.
         area_of_effect: Blast template diameter in inches (AOE), or ``0``
             if not applicable.
-        target: Short description of the valid target (e.g. "friendly
-            horror"), or ``""`` if not applicable / self-only.
+        target: Structured target filter, or ``None`` if not applicable /
+            self-only.
+        target_text: Short prose description of the valid target for
+            display, kept alongside the structured ``target``.
+        damage_type: Damage type of the blast (e.g. ``"Corrosion"``), or
+            ``""`` if not applicable.
+        blast_unboostable: ``True`` if the blast damage roll cannot be
+            boosted.
         duration: How long a granted effect lasts, or ``None`` if not
             applicable.
         grants: Names of special rules/advantages granted by this attack
             while ``duration`` applies. Resolved by name against the
             relevant registries by the caller.
+        on_hit: Effects applied to models hit by this attack, reusing
+            :class:`~.rule_primitives.RuleEffect`.
+        effects: Non-attack effects on cast/use (resource changes,
+            self-buffs), reusing :class:`~.rule_primitives.RuleEffect`.
+        destroyed_removed_from_play: ``True`` if models destroyed by this
+            attack are removed from play.
+        no_corpse_tokens: ``True`` if destroyed models do not generate
+            corpse tokens.
+        caster_gains_souls: ``True`` if the caster gains soul tokens from
+            living enemy models destroyed by this attack.
+        expires_upkeeps: ``True`` if enemy upkeep spells/animi on the
+            model/unit directly hit immediately expire.
+        usage_limit: Usage limits for this attack (e.g. once per turn per
+            target).
     """
 
     name: str = ""
@@ -112,9 +149,20 @@ class ModelSpecialAttack:
     power: Optional[int] = None
     blast_power: Optional[int] = None
     area_of_effect: int = 0
-    target: str = ""
+    target: Optional[MF] = None
+    target_text: str = ""
+    damage_type: str = ""
+    blast_unboostable: bool = False
     duration: Optional[Duration] = None
     grants: tuple[str, ...] = ()
+    on_hit: tuple[RuleEffect, ...] = ()
+    effects: tuple[RuleEffect, ...] = ()
+    destroyed_removed_from_play: bool = False
+    no_corpse_tokens: bool = False
+    caster_gains_souls: bool = False
+    expires_upkeeps: bool = False
+    usage_limit: Optional[UsageLimit] = None
+    notes: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +180,11 @@ class RitualsOfShadow(ModelSpecialAttack):
     name = "Rituals of Shadow"
     is_magic_ability = True
     range = 6.0
-    target = "friendly horror"
+    target = MF(relationship=Relationship.FRIENDLY, basic_types=("Horror",))
+    target_text = "friendly horror"
+    effects = (
+        RuleEffect(resource_changes=(ResourceChange(resource=Resource.ESSENCE, amount=1),)),
+    )
 
 
 class TouchOfDarkness(ModelSpecialAttack):
@@ -145,7 +197,11 @@ class TouchOfDarkness(ModelSpecialAttack):
     name = "Touch of Darkness"
     is_magic_ability = True
     range = 3.0
-    target = "friendly living soulless model"
+    target = MF(relationship=Relationship.FRIENDLY, is_living=True, advantages=("Soulless",))
+    target_text = "friendly living soulless model"
+    effects = (
+        RuleEffect(resource_changes=(ResourceChange(resource=Resource.DAMAGE, amount=-1, dice="d3"),)),
+    )
 
 
 class HexBolt(ModelSpecialAttack):
@@ -160,7 +216,16 @@ class HexBolt(ModelSpecialAttack):
     is_arcane_attack = True
     range = 6.0
     power = 13
-    duration = Duration.ROUND
+    on_hit = (
+        RuleEffect(
+            restrictions=(
+                RestrictionSpec(restriction=Restriction.CANNOT_MAKE_SPECIAL_ACTIONS),
+                RestrictionSpec(restriction=Restriction.CANNOT_MAKE_SPECIAL_ATTACKS),
+                RestrictionSpec(restriction=Restriction.CANNOT_MAKE_POWER_ATTACKS),
+            ),
+            duration=Duration.ROUND,
+        ),
+    )
 
 
 class Annihilation(ModelSpecialAttack):
@@ -180,6 +245,9 @@ class Annihilation(ModelSpecialAttack):
     area_of_effect = 2
     power = 10
     blast_power = 10
+    destroyed_removed_from_play = True
+    no_corpse_tokens = True
+    caster_gains_souls = True
 
 
 class CombatDrugs(ModelSpecialAttack):
@@ -191,7 +259,8 @@ class CombatDrugs(ModelSpecialAttack):
 
     name = "Combat Drugs"
     range = 5.0
-    target = "Cohort model in this model's battlegroup"
+    target = MF(relationship=Relationship.FRIENDLY, in_battlegroup=True, keywords=("Cohort",))
+    target_text = "Cohort model in this model's battlegroup"
     duration = Duration.TURN_PLAYER
     grants = ("Aggressive",)
 
@@ -205,7 +274,11 @@ class Vitalizer(ModelSpecialAttack):
 
     name = "Vitalizer"
     range = 6.0
-    target = "friendly monstrosity"
+    target = MF(relationship=Relationship.FRIENDLY, basic_types=("Monstrosity",))
+    target_text = "friendly monstrosity"
+    effects = (
+        RuleEffect(resource_changes=(ResourceChange(resource=Resource.FOCUS, amount=1),)),
+    )
 
 
 class HarmoniousExaltation(ModelSpecialAttack):
@@ -218,8 +291,14 @@ class HarmoniousExaltation(ModelSpecialAttack):
     name = "Harmonious Exaltation"
     is_magic_ability = True
     range = 5.0
-    target = "this model's Leader"
-    duration = Duration.TURN_PLAYER
+    target = MF(relationship=Relationship.FRIENDLY, notes="this model's Leader")
+    target_text = "this model's Leader"
+    effects = (
+        RuleEffect(
+            resource_changes=(ResourceChange(resource=Resource.SPELL_COST, amount=-1),),
+            usage_limit=UsageLimit(per_turn=1),
+        ),
+    )
 
 
 class SpellSlave(ModelSpecialAttack):
@@ -235,7 +314,7 @@ class SpellSlave(ModelSpecialAttack):
     name = "Spell Slave"
     is_magic_ability = True
     is_special_action = True
-    target = "itself, while within its Leader's control range"
+    target_text = "itself, while within its Leader's control range"
 
 
 class HexBlast(ModelSpecialAttack):
@@ -252,6 +331,7 @@ class HexBlast(ModelSpecialAttack):
     area_of_effect = 2
     power = 13
     blast_power = 8
+    expires_upkeeps = True
 
 
 class Marionnette(ModelSpecialAttack):
@@ -266,8 +346,17 @@ class Marionnette(ModelSpecialAttack):
     is_magic_ability = True
     is_arcane_attack = True
     range = 10.0
-    target = "enemy model/unit"
-    duration = Duration.ROUND
+    target = MF(relationship=Relationship.ENEMY)
+    target_text = "enemy model/unit"
+    on_hit = (
+        RuleEffect(
+            roll_modifiers=(
+                RM(RollType.ATTACK, RollModKind.REROLL, once_per_roll=True),
+            ),
+            duration=Duration.ROUND,
+            notes="One affected model rerolls one attack or damage roll, then expires",
+        ),
+    )
 
 
 class PuppetMaster(ModelSpecialAttack):
@@ -281,8 +370,17 @@ class PuppetMaster(ModelSpecialAttack):
     name = "Puppet Master"
     is_magic_ability = True
     range = 6.0
-    target = "friendly model/unit"
-    duration = Duration.ROUND
+    target = MF(relationship=Relationship.FRIENDLY)
+    target_text = "friendly model/unit"
+    effects = (
+        RuleEffect(
+            roll_modifiers=(
+                RM(RollType.ATTACK, RollModKind.REROLL, once_per_roll=True),
+            ),
+            duration=Duration.ROUND,
+            notes="One affected model rerolls one attack or damage roll, then expires",
+        ),
+    )
 
 
 class GripOfShadows(ModelSpecialAttack):
@@ -308,6 +406,16 @@ class WhispersAtTheGate(ModelSpecialAttack):
     name = "Whispers at the Gate"
     is_magic_ability = True
     range = 5.0
+    effects = (
+        RuleEffect(
+            scope=EffectScope(kind=ScopeKind.PULSE, radius=5.0, filter=MF(relationship=Relationship.ENEMY, keywords=("Infernal",))),
+            resource_changes=(ResourceChange(resource=Resource.ESSENCE, amount=-1),),
+        ),
+        RuleEffect(
+            scope=EffectScope(kind=ScopeKind.PULSE, radius=5.0, filter=MF(relationship=Relationship.FRIENDLY, keywords=("Infernal",))),
+            resource_changes=(ResourceChange(resource=Resource.ESSENCE, amount=1),),
+        ),
+    )
 
 
 class WordOfRuin(ModelSpecialAttack):
@@ -334,7 +442,12 @@ class DarkCalling(ModelSpecialAttack):
     is_magic_ability = True
     is_special_action = True
     range = 3.0
-    target = "friendly horror"
+    target = MF(relationship=Relationship.FRIENDLY, basic_types=("Horror",))
+    target_text = "friendly horror"
+    effects = (
+        RuleEffect(additional_action=AdditionalAction(action_type=ActionType.BASIC_MELEE_OR_RANGED_ATTACK)),
+    )
+    usage_limit = UsageLimit(per_turn=1)
 
 
 class FlysKiss(ModelSpecialAttack):
@@ -352,6 +465,10 @@ class FlysKiss(ModelSpecialAttack):
     range = 8.0
     power = 12
     blast_power = 10
+    damage_type = "Corrosion"
+    blast_unboostable = True
+    destroyed_removed_from_play = True
+    notes = 'Models within 2" of the boxed model suffer an unboostable POW 10 corrosion blast damage roll'
 
 
 class InvocationOfBitterestNight(ModelSpecialAttack):
