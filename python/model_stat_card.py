@@ -14,8 +14,10 @@
 
 """Model stat card module for the Warmachine game.
 
-Defines the ModelStatCard and ModelStatistics dataclasses and all related
-enums used to represent Warmachine model data in a JSON-serializable format.
+Defines the ModelStatCard dataclass and all related enums used to represent
+Warmachine model data in a JSON-serializable format.  The statistics type
+itself lives in :mod:`model_statistics` and is re-exported here for
+convenience.
 """
 
 from __future__ import annotations
@@ -32,6 +34,7 @@ from .damage_system import (
 )
 from .model_special_attack import ModelSpecialAttack, model_special_attack_from_name
 from .model_special_rule import ModelSpecialRule, model_special_rule_from_name
+from .model_statistics import ModelStatistics
 from .weapon import Hardpoint, MeleeWeapon, RangeWeapon
 
 
@@ -184,107 +187,6 @@ class TrooperEntry:
         return cls(
             model_name=str(data["model_name"]),
             quantity=int(data.get("quantity", 1)),
-        )
-
-
-@dataclass
-class ModelStatistics:
-    """Combat statistics for a Warmachine model.
-
-    All attributes are integers >= -1.  Use ``-1`` to indicate that a stat
-    is not applicable to this model (e.g. ARC for non-warcasters).  Use ``0``
-    as the true zero value.
-
-    Attributes:
-        spd: Speed.
-        aat: Arcane Attack.
-        mat: Melee Attack.
-        rat: Ranged Attack.
-        def_: Defense. Serialised as ``"def"`` in JSON because ``def`` is a
-            Python keyword.
-        arm: Armor.
-        arc: Arcana.
-        fury: Fury.
-        ctrl: Control Range.
-        thr: Threshold.
-    """
-
-    spd: int = -1
-    aat: int = -1
-    mat: int = -1
-    rat: int = -1
-    def_: int = -1
-    arm: int = -1
-    arc: int = -1
-    fury: int = -1
-    ctrl: int = -1
-    thr: int = -1
-
-    def __post_init__(self) -> None:
-        """Validate that all statistics are non-negative.
-
-        Raises:
-            ValueError: If any statistic is < -1.
-        """
-        for attr_name, value in [
-            ("spd", self.spd),
-            ("aat", self.aat),
-            ("mat", self.mat),
-            ("rat", self.rat),
-            ("def", self.def_),
-            ("arm", self.arm),
-            ("arc", self.arc),
-            ("fury", self.fury),
-            ("ctrl", self.ctrl),
-            ("thr", self.thr),
-        ]:
-            if value < -1:
-                raise ValueError(f"{attr_name} must be >= -1, got {value}")
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialise to a JSON-compatible dictionary.
-
-        Returns:
-            Dictionary representation suitable for direct use with
-            :func:`json.dumps`. Uses ``"def"`` as the key for :attr:`def_`.
-        """
-        return {
-            "spd": self.spd,
-            "aat": self.aat,
-            "mat": self.mat,
-            "rat": self.rat,
-            "def": self.def_,
-            "arm": self.arm,
-            "arc": self.arc,
-            "fury": self.fury,
-            "ctrl": self.ctrl,
-            "thr": self.thr,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> ModelStatistics:
-        """Deserialise from a dictionary produced by :meth:`to_dict`.
-
-        Args:
-            data: Dictionary as returned by :meth:`to_dict`.
-
-        Returns:
-            New :class:`ModelStatistics` instance.
-
-        Raises:
-            ValueError: If any statistic is < -1.
-        """
-        return cls(
-            spd=int(data.get("spd", 0)),
-            aat=int(data.get("aat", 0)),
-            mat=int(data.get("mat", 0)),
-            rat=int(data.get("rat", 0)),
-            def_=int(data.get("def", 0)),
-            arm=int(data.get("arm", 0)),
-            arc=int(data.get("arc", 0)),
-            fury=int(data.get("fury", 0)),
-            ctrl=int(data.get("ctrl", 0)),
-            thr=int(data.get("thr", 0)),
         )
 
 

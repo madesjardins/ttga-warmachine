@@ -32,15 +32,15 @@
       "cost": 0,
       "model_statistics": {
         "spd": 6,
-        "aat": -1,
+        "aat": 0,
         "mat": 4,
         "rat": 5,
         "def": 12,
         "arm": 13,
-        "arc": -1,
-        "fury": -1,
-        "ctrl": -1,
-        "thr": -1
+        "arc": 0,
+        "fury": 0,
+        "ctrl": 0,
+        "thr": 0
       },
       "damage_system_type": "box",
       "damage_system": {
@@ -122,10 +122,10 @@
         "rat": 5,
         "def": 12,
         "arm": 16,
-        "arc": -1,
-        "fury": -1,
-        "ctrl": -1,
-        "thr": -1
+        "arc": 0,
+        "fury": 0,
+        "ctrl": 0,
+        "thr": 0
       },
       "damage_system_type": "box",
       "damage_system": {
@@ -208,13 +208,13 @@
         "spd": 6,
         "aat": 6,
         "mat": 5,
-        "rat": -1,
+        "rat": 0,
         "def": 12,
         "arm": 15,
-        "arc": -1,
-        "fury": -1,
-        "ctrl": -1,
-        "thr": -1
+        "arc": 0,
+        "fury": 0,
+        "ctrl": 0,
+        "thr": 0
       },
       "damage_system_type": "box",
       "damage_system": {
@@ -312,15 +312,15 @@
       "cost": 1,
       "model_statistics": {
         "spd": 5,
-        "aat": -1,
+        "aat": 0,
         "mat": 6,
         "rat": 5,
         "def": 12,
         "arm": 16,
-        "arc": -1,
-        "fury": -1,
-        "ctrl": -1,
-        "thr": -1
+        "arc": 0,
+        "fury": 0,
+        "ctrl": 0,
+        "thr": 0
       },
       "damage_system_type": "box",
       "damage_system": {
@@ -401,15 +401,15 @@
       "cost": 0,
       "model_statistics": {
         "spd": 6,
-        "aat": -1,
+        "aat": 0,
         "mat": 5,
         "rat": 5,
         "def": 12,
         "arm": 13,
-        "arc": -1,
-        "fury": -1,
-        "ctrl": -1,
-        "thr": -1
+        "arc": 0,
+        "fury": 0,
+        "ctrl": 0,
+        "thr": 0
       },
       "damage_system_type": "box",
       "damage_system": {
@@ -527,15 +527,15 @@
       "cost": 0,
       "model_statistics": {
         "spd": 7,
-        "aat": -1,
-        "mat": -1,
+        "aat": 0,
+        "mat": 0,
         "rat": 6,
         "def": 13,
         "arm": 12,
-        "arc": -1,
-        "fury": -1,
-        "ctrl": -1,
-        "thr": -1
+        "arc": 0,
+        "fury": 0,
+        "ctrl": 0,
+        "thr": 0
       },
       "damage_system_type": "box",
       "damage_system": {

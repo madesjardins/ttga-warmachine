@@ -1227,8 +1227,8 @@ class ModelEditorDialog(QtWidgets.QDialog):
             lbl = QtWidgets.QLabel(name)
             lbl.setAlignment(Qt.AlignCenter)
             spin = QtWidgets.QSpinBox()
-            spin.setRange(-1, 99)
-            spin.setValue(-1)
+            spin.setRange(0, 99)
+            spin.setValue(0)
             spin.setSpecialValueText("-")
             spin.setFixedWidth(52)
             v.addWidget(lbl)
@@ -1548,7 +1548,7 @@ class ModelEditorDialog(QtWidgets.QDialog):
         for cb in self._resistance_cbs.values():
             cb.setChecked(False)
         for spin in self._stat_spins.values():
-            spin.setValue(-1)
+            spin.setValue(0)
         self.dmg_type_combo.setCurrentIndex(0)
         self.box_spin.setValue(1)
         self._left_grid_data = [[DamageKey.BLANK] * GRID_SIZE for _ in range(GRID_SIZE)]
