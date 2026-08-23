@@ -58,8 +58,8 @@ from .weapon import (
     WeaponQuality,
 )
 from .model_special_attack import (
-    all_special_attack_names,
-    model_special_attack_from_name,
+    all_special_action_names,
+    model_special_action_from_name,
 )
 from .model_special_rule import (
     all_rule_names as all_model_special_rule_names,
@@ -1277,16 +1277,13 @@ class ModelEditorDialog(QtWidgets.QDialog):
         self.special_rules_tag = TagInputWidget(str_values=all_model_special_rule_names())
         rules_v.addWidget(self.special_rules_tag)
 
-        self.special_actions_list, pnl2 = self._make_string_list_editor("Special Actions")
-
-        attacks_grp = QtWidgets.QGroupBox("Special Attacks")
-        attacks_v = QtWidgets.QVBoxLayout(attacks_grp)
-        self.special_attacks_tag = TagInputWidget(str_values=all_special_attack_names())
-        attacks_v.addWidget(self.special_attacks_tag)
+        actions_grp = QtWidgets.QGroupBox("Special Actions / Attacks")
+        actions_v = QtWidgets.QVBoxLayout(actions_grp)
+        self.special_actions_tag = TagInputWidget(str_values=all_special_action_names())
+        actions_v.addWidget(self.special_actions_tag)
 
         h.addWidget(rules_grp)
-        h.addWidget(pnl2)
-        h.addWidget(attacks_grp)
+        h.addWidget(actions_grp)
         return widget
 
     # -- Tab: Health --
@@ -1519,8 +1516,7 @@ class ModelEditorDialog(QtWidgets.QDialog):
         self._set_damage_system(card.damage_system_type, card.damage_system)
 
         self.special_rules_tag.set_values([r.name for r in card.special_rules])
-        self._load_string_list(self.special_actions_list, card.special_actions)
-        self.special_attacks_tag.set_values([a.name for a in card.special_attacks])
+        self.special_actions_tag.set_values([a.name for a in card.special_actions])
 
         self.feat_edit.setText(card.feat)
         self._load_string_list(self.spells_list, card.spells)
@@ -1556,8 +1552,7 @@ class ModelEditorDialog(QtWidgets.QDialog):
         self._update_grid_summary()
         self._update_stat_visibility()
         self.special_rules_tag.clear()
-        self.special_actions_list.clear()
-        self.special_attacks_tag.clear()
+        self.special_actions_tag.clear()
         self.feat_edit.clear()
         self.spells_list.clear()
         self._weapons = []
@@ -1638,9 +1633,8 @@ class ModelEditorDialog(QtWidgets.QDialog):
                 special_rules=[
                     model_special_rule_from_name(v) for v in self.special_rules_tag.selected_values()
                 ],
-                special_actions=self._list_widget_strings(self.special_actions_list),
-                special_attacks=[
-                    model_special_attack_from_name(v) for v in self.special_attacks_tag.selected_values()
+                special_actions=[
+                    model_special_action_from_name(v) for v in self.special_actions_tag.selected_values()
                 ],
                 feat=self.feat_edit.text(),
                 spells=self._list_widget_strings(self.spells_list),
@@ -1672,12 +1666,11 @@ class ModelEditorDialog(QtWidgets.QDialog):
         for spin in self._stat_spins.values():
             spin.valueChanged.connect(self._mark_dirty)
         for tag in (self.armies_tag, self.keywords_tag, self.advantages_tag,
-                    self.special_rules_tag, self.special_attacks_tag):
+                    self.special_rules_tag, self.special_actions_tag):
             tag.changed.connect(self._mark_dirty)
         for cb in self._resistance_cbs.values():
             cb.stateChanged.connect(self._mark_dirty)
         for lst in (self.vocal_list,
-                    self.special_actions_list,
                     self.spells_list):
             lst.model().rowsInserted.connect(self._mark_dirty)
             lst.model().rowsRemoved.connect(self._mark_dirty)

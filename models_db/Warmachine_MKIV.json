@@ -63,7 +63,9 @@
       "special_actions": [],
       "special_attacks": [],
       "spells": [],
-      "special_rules": [],
+      "special_rules": [
+        "Combined Arms"
+      ],
       "melee_weapons": [
         {
           "weapon_type": "melee",
@@ -232,9 +234,14 @@
       "model_resistances": [],
       "feat": "",
       "special_actions": [],
-      "special_attacks": [],
+      "special_attacks": [
+        "Hex Bolt"
+      ],
       "spells": [],
-      "special_rules": [],
+      "special_rules": [
+        "Battle Wizard",
+        "Gang"
+      ],
       "melee_weapons": [
         {
           "weapon_type": "melee",
@@ -345,7 +352,9 @@
       "special_actions": [],
       "special_attacks": [],
       "spells": [],
-      "special_rules": [],
+      "special_rules": [
+        "Take Up"
+      ],
       "melee_weapons": [
         {
           "weapon_type": "melee",
