@@ -45,6 +45,7 @@ class Duration(str, Enum):
     ROUND = "Round"
     TURN_PLAYER = "Turn Player"
     TURN_OPPONENT = "Turn Opponent"
+    ACTIVATION = "Activation"
     ACTIVATION_PLAYER = "Activation Player"
     ACTIVATION_OPPONENT = "Activation Opponent"
     ONCE_MORE = "Once More"
