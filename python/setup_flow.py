@@ -219,7 +219,7 @@ class SetupFlow(QtCore.QObject):
             self._say(
                 "Let us prepare for battle. Which game mode shall we play? "
                 "You can say single match.",
-                use_persona=True,
+                use_persona=False,
             )
             self.status_changed.emit("Setup: choose a game mode…")
 
@@ -379,7 +379,7 @@ class SetupFlow(QtCore.QObject):
         self._say(
             f"Single match it is. How many points shall each army field? "
             f"For example, fifty or seventy five.",
-            use_persona=True,
+            use_persona=False,
         )
         self.status_changed.emit("Setup: choose army points…")
 
@@ -409,7 +409,7 @@ class SetupFlow(QtCore.QObject):
             f"A single match at {points} points. "
             "What deployment zone depth shall we use, in inches? "
             "The standard is seven inches.",
-            use_persona=True,
+            use_persona=False,
         )
         self.status_changed.emit("Setup: choose deployment depth…")
 
@@ -447,7 +447,7 @@ class SetupFlow(QtCore.QObject):
             self._deployment_depth = 7.0
             self._say(
                 "Using the standard seven inches for deployment depth.",
-                use_persona=True,
+                use_persona=False,
             )
         elif not (4.0 <= depth <= 15.0):
             self._say(
@@ -459,7 +459,7 @@ class SetupFlow(QtCore.QObject):
             self._deployment_depth = depth
             self._say(
                 f"Deployment depth set to {depth:.0f} inches.",
-                use_persona=True,
+                use_persona=False,
             )
 
         self._state = SetupState.CONFIRM
@@ -473,7 +473,7 @@ class SetupFlow(QtCore.QObject):
             f"A single match at {points_str} points, with {depth_str} inch "
             "deployment zones. Shall we begin? "
             "Say yes to start, or restart to change the settings.",
-            use_persona=True,
+            use_persona=False,
         )
         self.status_changed.emit("Setup: confirm to begin…")
 
@@ -504,7 +504,7 @@ class SetupFlow(QtCore.QObject):
                 self._say(
                     "Very well, let us start over. Which game mode shall we play? "
                     "You can say single match.",
-                    use_persona=True,
+                    use_persona=False,
                 )
                 self.status_changed.emit("Setup: choose a game mode…")
             return

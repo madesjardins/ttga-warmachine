@@ -573,7 +573,7 @@ class Deployment(QtCore.QObject):
         self._log.system("Deployment phase is complete for both players.")
         self._say(
             "Both armies are deployed. Deployment is complete.",
-            use_persona=True,
+            use_persona=False,
         )
         self.phase_completed.emit()
 

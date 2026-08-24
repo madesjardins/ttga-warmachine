@@ -174,7 +174,7 @@ class ArmyCreation(QtCore.QObject):
             self._service.intent_parsed.connect(self._on_intent_parsed)
             self._service_connected = True
         self._event_manager.push_speech_handler(self._on_speech)
-        self._say("Army creation begins.", use_persona=True)
+        self._say("Army creation begins.", use_persona=False)
         self._begin_faction_selection()
 
     def stop(self) -> None:
@@ -242,7 +242,7 @@ class ArmyCreation(QtCore.QObject):
         self._say(
             f"{player_label}, which faction will your army be? "
             "Speak the name of your faction.",
-            use_persona=True,
+            use_persona=False,
         )
         self.status_changed.emit(f"Waiting for {player_label} faction…")
 
@@ -262,7 +262,7 @@ class ArmyCreation(QtCore.QObject):
         player_label = f"Player {self._current_player + 1}"
         self._say(
             f"{player_label} has chosen the faction {faction}.",
-            use_persona=True,
+            use_persona=False,
         )
         self.faction_selected.emit(self._current_player, faction)
         self._prompt_next_model()
@@ -283,7 +283,7 @@ class ArmyCreation(QtCore.QObject):
             text = (
                 f"{player_label}, speak the name of the next model or unit."
             )
-        self._say(text, use_persona=True)
+        self._say(text, use_persona=False)
         self.status_changed.emit(f"Waiting for {player_label}…")
 
     # ------------------------------------------------------------------
@@ -557,7 +557,7 @@ class ArmyCreation(QtCore.QObject):
         self._say(
             f"{player_label}'s army is complete with {count} "
             f"{'entry' if count == 1 else 'entries'}.",
-            use_persona=True,
+            use_persona=False,
         )
 
         if self._current_player == 0:
@@ -566,7 +566,7 @@ class ArmyCreation(QtCore.QObject):
         else:
             self._say(
                 "Both armies are now complete. Army creation is finished.",
-                use_persona=True,
+                use_persona=False,
             )
             self._active = False
             self._event_manager.pop_speech_handler(self._on_speech)
