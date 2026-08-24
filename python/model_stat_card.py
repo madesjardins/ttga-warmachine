@@ -14,8 +14,10 @@
 
 """Model stat card module for the Warmachine game.
 
-Defines the ModelStatCard and ModelStatistics dataclasses and all related
-enums used to represent Warmachine model data in a JSON-serializable format.
+Defines the ModelStatCard dataclass and all related enums used to represent
+Warmachine model data in a JSON-serializable format.  The statistics type
+itself lives in :mod:`model_statistics` and is re-exported here for
+convenience.
 """
 
 from __future__ import annotations
@@ -30,6 +32,13 @@ from .damage_system import (
     DamageSystemType,
     damage_system_from_dict,
 )
+from .model_special_attack import (
+    ModelSpecialAction,
+    SpecialActionType,
+    model_special_action_from_name,
+)
+from .model_special_rule import ModelSpecialRule, model_special_rule_from_name
+from .model_statistics import ModelStatistics
 from .weapon import Hardpoint, MeleeWeapon, RangeWeapon
 
 
@@ -186,107 +195,6 @@ class TrooperEntry:
 
 
 @dataclass
-class ModelStatistics:
-    """Combat statistics for a Warmachine model.
-
-    All attributes are integers >= -1.  Use ``-1`` to indicate that a stat
-    is not applicable to this model (e.g. ARC for non-warcasters).  Use ``0``
-    as the true zero value.
-
-    Attributes:
-        spd: Speed.
-        aat: Arcane Attack.
-        mat: Melee Attack.
-        rat: Ranged Attack.
-        def_: Defense. Serialised as ``"def"`` in JSON because ``def`` is a
-            Python keyword.
-        arm: Armor.
-        arc: Arcana.
-        fury: Fury.
-        ctrl: Control Range.
-        thr: Threshold.
-    """
-
-    spd: int = -1
-    aat: int = -1
-    mat: int = -1
-    rat: int = -1
-    def_: int = -1
-    arm: int = -1
-    arc: int = -1
-    fury: int = -1
-    ctrl: int = -1
-    thr: int = -1
-
-    def __post_init__(self) -> None:
-        """Validate that all statistics are non-negative.
-
-        Raises:
-            ValueError: If any statistic is < -1.
-        """
-        for attr_name, value in [
-            ("spd", self.spd),
-            ("aat", self.aat),
-            ("mat", self.mat),
-            ("rat", self.rat),
-            ("def", self.def_),
-            ("arm", self.arm),
-            ("arc", self.arc),
-            ("fury", self.fury),
-            ("ctrl", self.ctrl),
-            ("thr", self.thr),
-        ]:
-            if value < -1:
-                raise ValueError(f"{attr_name} must be >= -1, got {value}")
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialise to a JSON-compatible dictionary.
-
-        Returns:
-            Dictionary representation suitable for direct use with
-            :func:`json.dumps`. Uses ``"def"`` as the key for :attr:`def_`.
-        """
-        return {
-            "spd": self.spd,
-            "aat": self.aat,
-            "mat": self.mat,
-            "rat": self.rat,
-            "def": self.def_,
-            "arm": self.arm,
-            "arc": self.arc,
-            "fury": self.fury,
-            "ctrl": self.ctrl,
-            "thr": self.thr,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> ModelStatistics:
-        """Deserialise from a dictionary produced by :meth:`to_dict`.
-
-        Args:
-            data: Dictionary as returned by :meth:`to_dict`.
-
-        Returns:
-            New :class:`ModelStatistics` instance.
-
-        Raises:
-            ValueError: If any statistic is < -1.
-        """
-        return cls(
-            spd=int(data.get("spd", 0)),
-            aat=int(data.get("aat", 0)),
-            mat=int(data.get("mat", 0)),
-            rat=int(data.get("rat", 0)),
-            def_=int(data.get("def", 0)),
-            arm=int(data.get("arm", 0)),
-            arc=int(data.get("arc", 0)),
-            fury=int(data.get("fury", 0)),
-            ctrl=int(data.get("ctrl", 0)),
-            thr=int(data.get("thr", 0)),
-        )
-
-
-@dataclass
 class ModelStatCard:
     """Represents a Warmachine model stat card.
 
@@ -311,10 +219,9 @@ class ModelStatCard:
         advantages: Model advantages.
         model_resistances: Damage type resistances.
         feat: Feat description text (empty string if none).
-        special_actions: Special action descriptions.
-        special_attacks: Special attack descriptions.
+        special_actions: Special actions and attacks (unified list).
         spells: Spell descriptions.
-        special_rules: Special rule descriptions.
+        special_rules: Model special rules.
         melee_weapons: Melee weapons carried by the model.
         range_weapons: Ranged weapons carried by the model.
         available_hardpoints: Weapon hardpoints available on the model, grouped
@@ -338,10 +245,9 @@ class ModelStatCard:
     advantages: list[ModelAdvantage] = field(default_factory=list)
     model_resistances: list[ModelResistance] = field(default_factory=list)
     feat: str = ""
-    special_actions: list[str] = field(default_factory=list)
-    special_attacks: list[str] = field(default_factory=list)
+    special_actions: list[ModelSpecialAction] = field(default_factory=list)
     spells: list[str] = field(default_factory=list)
-    special_rules: list[str] = field(default_factory=list)
+    special_rules: list[ModelSpecialRule] = field(default_factory=list)
     melee_weapons: list[MeleeWeapon] = field(default_factory=list)
     range_weapons: list[RangeWeapon] = field(default_factory=list)
     available_hardpoints: list[list[Hardpoint]] = field(default_factory=list)
@@ -402,10 +308,9 @@ class ModelStatCard:
             "advantages": [adv.value for adv in self.advantages],
             "model_resistances": [r.value for r in self.model_resistances],
             "feat": self.feat,
-            "special_actions": list(self.special_actions),
-            "special_attacks": list(self.special_attacks),
+            "special_actions": [a.name for a in self.special_actions],
             "spells": list(self.spells),
-            "special_rules": list(self.special_rules),
+            "special_rules": [r.name for r in self.special_rules],
             "melee_weapons": [w.to_dict() for w in self.melee_weapons],
             "range_weapons": [w.to_dict() for w in self.range_weapons],
             "available_hardpoints": [[h.to_dict() for h in group] for group in self.available_hardpoints],
@@ -447,10 +352,15 @@ class ModelStatCard:
             advantages=[ModelAdvantage(adv) for adv in data.get("advantages", [])],
             model_resistances=[ModelResistance(r) for r in data.get("model_resistances", [])],
             feat=str(data.get("feat", "")),
-            special_actions=list(data.get("special_actions", [])),
-            special_attacks=list(data.get("special_attacks", [])),
+            special_actions=[
+                model_special_action_from_name(a)
+                for a in data.get("special_actions", [])
+            ] + [
+                model_special_action_from_name(a)
+                for a in data.get("special_attacks", [])
+            ],
             spells=list(data.get("spells", [])),
-            special_rules=list(data.get("special_rules", [])),
+            special_rules=[model_special_rule_from_name(r) for r in data.get("special_rules", [])],
             melee_weapons=[
                 MeleeWeapon.from_dict(w) for w in data.get("melee_weapons", [])
             ],

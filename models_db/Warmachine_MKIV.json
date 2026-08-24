@@ -32,15 +32,15 @@
       "cost": 0,
       "model_statistics": {
         "spd": 6,
-        "aat": -1,
+        "aat": 0,
         "mat": 4,
         "rat": 5,
         "def": 12,
         "arm": 13,
-        "arc": -1,
-        "fury": -1,
-        "ctrl": -1,
-        "thr": -1
+        "arc": 0,
+        "fury": 0,
+        "ctrl": 0,
+        "thr": 0
       },
       "damage_system_type": "box",
       "damage_system": {
@@ -63,7 +63,9 @@
       "special_actions": [],
       "special_attacks": [],
       "spells": [],
-      "special_rules": [],
+      "special_rules": [
+        "Combined Arms"
+      ],
       "melee_weapons": [
         {
           "weapon_type": "melee",
@@ -122,10 +124,10 @@
         "rat": 5,
         "def": 12,
         "arm": 16,
-        "arc": -1,
-        "fury": -1,
-        "ctrl": -1,
-        "thr": -1
+        "arc": 0,
+        "fury": 0,
+        "ctrl": 0,
+        "thr": 0
       },
       "damage_system_type": "box",
       "damage_system": {
@@ -148,7 +150,9 @@
       "special_actions": [],
       "special_attacks": [],
       "spells": [],
-      "special_rules": [],
+      "special_rules": [
+        "Quick Work"
+      ],
       "melee_weapons": [
         {
           "weapon_type": "melee",
@@ -206,13 +210,13 @@
         "spd": 6,
         "aat": 6,
         "mat": 5,
-        "rat": -1,
+        "rat": 0,
         "def": 12,
         "arm": 15,
-        "arc": -1,
-        "fury": -1,
-        "ctrl": -1,
-        "thr": -1
+        "arc": 0,
+        "fury": 0,
+        "ctrl": 0,
+        "thr": 0
       },
       "damage_system_type": "box",
       "damage_system": {
@@ -230,9 +234,14 @@
       "model_resistances": [],
       "feat": "",
       "special_actions": [],
-      "special_attacks": [],
+      "special_attacks": [
+        "Hex Bolt"
+      ],
       "spells": [],
-      "special_rules": [],
+      "special_rules": [
+        "Battle Wizard",
+        "Gang"
+      ],
       "melee_weapons": [
         {
           "weapon_type": "melee",
@@ -310,15 +319,15 @@
       "cost": 1,
       "model_statistics": {
         "spd": 5,
-        "aat": -1,
+        "aat": 0,
         "mat": 6,
         "rat": 5,
         "def": 12,
         "arm": 16,
-        "arc": -1,
-        "fury": -1,
-        "ctrl": -1,
-        "thr": -1
+        "arc": 0,
+        "fury": 0,
+        "ctrl": 0,
+        "thr": 0
       },
       "damage_system_type": "box",
       "damage_system": {
@@ -343,7 +352,9 @@
       "special_actions": [],
       "special_attacks": [],
       "spells": [],
-      "special_rules": [],
+      "special_rules": [
+        "Take Up"
+      ],
       "melee_weapons": [
         {
           "weapon_type": "melee",
@@ -399,15 +410,15 @@
       "cost": 0,
       "model_statistics": {
         "spd": 6,
-        "aat": -1,
+        "aat": 0,
         "mat": 5,
         "rat": 5,
         "def": 12,
         "arm": 13,
-        "arc": -1,
-        "fury": -1,
-        "ctrl": -1,
-        "thr": -1
+        "arc": 0,
+        "fury": 0,
+        "ctrl": 0,
+        "thr": 0
       },
       "damage_system_type": "box",
       "damage_system": {
@@ -525,15 +536,15 @@
       "cost": 0,
       "model_statistics": {
         "spd": 7,
-        "aat": -1,
-        "mat": -1,
+        "aat": 0,
+        "mat": 0,
         "rat": 6,
         "def": 13,
         "arm": 12,
-        "arc": -1,
-        "fury": -1,
-        "ctrl": -1,
-        "thr": -1
+        "arc": 0,
+        "fury": 0,
+        "ctrl": 0,
+        "thr": 0
       },
       "damage_system_type": "box",
       "damage_system": {

@@ -227,10 +227,12 @@ class WarmachineDialog(GameDialog):
 
         layout.addLayout(armies_row, stretch=1)
 
-        # General-purpose content area for future phases
+        # General-purpose content area for phase-specific UI
         self.ingame_content_area = QtWidgets.QStackedWidget()
         empty_page = QtWidgets.QWidget()
         self.ingame_content_area.addWidget(empty_page)
+        # Deployment checklist page (added at index 1 when deployment starts)
+        self._deployment_page_index = 0
         layout.addWidget(self.ingame_content_area)
 
         return widget
@@ -420,12 +422,20 @@ class WarmachineDialog(GameDialog):
         # Run phrasing + intent parsing off the Qt thread, streaming narration
         # to the narrator one sentence at a time so the UI stays responsive.
         self._narration_service = NarrationService(narration_engine, narrator)
+        # Resolve the play_area Zone object for Deployment phase.
+        play_area_zone_name = zone_mapping.get("play_area")
+        play_area_zone = None
+        if play_area_zone_name:
+            play_area_zone = core.zone_manager.get_zone(play_area_zone_name)
+
         self._match = Match(
             db=self._current_db,
             event_manager=self._event_manager,
             narrator=narrator,
             narration_engine=narration_engine,
             narration_service=self._narration_service,
+            zone=play_area_zone,
+            game_mode=self.game_mode_combo.currentData(),
             parent=self,
         )
 
@@ -437,6 +447,8 @@ class WarmachineDialog(GameDialog):
         # Wire phase-specific signals once each phase starts
         self._match.phase_changed.connect(self._wire_setup)
         self._match.phase_changed.connect(self._wire_army_creation)
+        self._match.phase_changed.connect(self._wire_roll_off)
+        self._match.phase_changed.connect(self._wire_deployment)
 
         # Update UI
         self.game_status_label.setText("Game Status: Running")
@@ -494,6 +506,14 @@ class WarmachineDialog(GameDialog):
         self.p1_army_list.clear()
         self.p2_army_list.clear()
         self._update_army_points()
+        # Reset deployment page.
+        if self._deployment_page_index > 0:
+            old = self.ingame_content_area.widget(self._deployment_page_index)
+            if old is not None:
+                self.ingame_content_area.removeWidget(old)
+                old.deleteLater()
+            self._deployment_page_index = 0
+        self.ingame_content_area.setCurrentIndex(0)
 
     # ------------------------------------------------------------------
     # Match signal handlers
@@ -533,6 +553,82 @@ class WarmachineDialog(GameDialog):
         ac.qr_progress.connect(self._on_army_qr_progress)
         ac.model_cancelled.connect(self._on_army_model_cancelled)
         ac.status_changed.connect(self._on_ingame_status)
+
+    @QtCore.Slot(str)
+    def _wire_roll_off(self, phase_value: str) -> None:
+        """Connect roll-off signals when that phase starts."""
+        if self._match is None or self._match.roll_off is None:
+            return
+        ro = self._match.roll_off
+        ro.status_changed.connect(self._on_ingame_status)
+
+    @QtCore.Slot(str)
+    def _wire_deployment(self, phase_value: str) -> None:
+        """Connect deployment signals when that phase starts."""
+        if self._match is None or self._match.deployment is None:
+            return
+        dep = self._match.deployment
+        dep.status_changed.connect(self._on_ingame_status)
+        dep.model_position_updated.connect(self._on_deployment_position_updated)
+        dep.all_placed_changed.connect(self._on_deployment_all_placed)
+        # Build the deployment checklist page.
+        self._build_deployment_page()
+
+    def _build_deployment_page(self) -> None:
+        """Create a per-player checklist widget in the ingame content area."""
+        if self._match is None or self._match.deployment is None:
+            return
+        dep = self._match.deployment
+        page = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(page)
+
+        for p_idx in (0, 1):
+            group = QtWidgets.QGroupBox(f"Player {p_idx + 1} Deployment")
+            g_layout = QtWidgets.QVBoxLayout(group)
+            for status in dep.statuses[p_idx]:
+                lbl = QtWidgets.QLabel(f"{status.card.name} — not placed")
+                lbl.setObjectName(f"dep_lbl_{p_idx}_{status.card.name}")
+                g_layout.addWidget(lbl)
+            layout.addWidget(group)
+
+        layout.addStretch()
+        # Replace the empty page (index 0) or add a new one.
+        if self._deployment_page_index > 0:
+            old = self.ingame_content_area.widget(self._deployment_page_index)
+            self.ingame_content_area.removeWidget(old)
+            old.deleteLater()
+        self._deployment_page_index = self.ingame_content_area.addWidget(page)
+        self.ingame_content_area.setCurrentIndex(self._deployment_page_index)
+
+    @QtCore.Slot(int, str, object, bool)
+    def _on_deployment_position_updated(
+        self, player: int, model_name: str, position: tuple, in_zone: bool
+    ) -> None:
+        """Update the deployment checklist when a model position changes."""
+        if self._deployment_page_index <= 0:
+            return
+        page = self.ingame_content_area.widget(self._deployment_page_index)
+        if page is None:
+            return
+        target_name = f"dep_lbl_{player}_{model_name}"
+        labels = page.findChildren(QtWidgets.QLabel)
+        for lbl in labels:
+            if lbl.objectName() == target_name:
+                status_str = "in zone" if in_zone else "out of zone"
+                x, y = position
+                lbl.setText(
+                    f'{model_name} — {status_str} ({x:.1f}", {y:.1f}")'
+                )
+                break
+
+    @QtCore.Slot(int, bool)
+    def _on_deployment_all_placed(self, player: int, all_placed: bool) -> None:
+        """Update status when all models for a player are placed."""
+        if all_placed:
+            self.ingame_status_label.setText(
+                f"Player {player + 1}: all models in deployment zone. "
+                "Say 'deployment complete' to finish."
+            )
 
     @staticmethod
     def _format_army_entry(
@@ -970,11 +1066,13 @@ class Game(GameBase):
                 summaries = {
                     "game_mode": "The player is choosing a game mode.",
                     "points": "The player is choosing the points value for the match.",
+                    "deployment_depth": "The player is choosing the deployment zone depth.",
                     "confirm": "The player is confirming the setup configuration.",
                 }
                 topics = {
                     "game_mode": "Say 'single match' to choose a single-game format.",
                     "points": "Say a number like '50 points' to set the army point value.",
+                    "deployment_depth": "Say a number like '7 inches' to set the deployment zone depth, or accept the default of 7.",
                     "cancel": "Say 'cancel' to abort the setup.",
                     "repeat": "Say 'repeat' to hear the last prompt again.",
                 }
@@ -1008,6 +1106,46 @@ class Game(GameBase):
                     "army_complete": "Say 'army complete' when you are finished adding models.",
                     "undo": "Say 'undo' to remove the last model added.",
                     "points": "Each model costs points. The army total must not exceed the agreed points limit.",
+                },
+            }
+
+        if phase == MatchPhase.ROLL_OFF:
+            ro = match.roll_off
+            state_name = ro.state.name.lower() if ro is not None else "unknown"
+            return {
+                "state": f"roll_off_{state_name}",
+                "summary": (
+                    "First-player roll-off. Players roll physical dice and "
+                    "report the results by voice. The winner chooses table "
+                    "side or turn order."
+                ),
+                "current_options": ["report a die result", "cancel"],
+                "topics": {
+                    "report_roll": "Say the number you rolled, like 'four' or '4'.",
+                    "choose_side": "Say 'side' to choose a table side.",
+                    "choose_turn": "Say 'first turn' to choose turn order.",
+                    "north_south": "Say 'north' or 'south' to pick a table edge.",
+                    "cancel": "Say 'cancel' to abort the roll-off.",
+                },
+            }
+
+        if phase == MatchPhase.DEPLOYMENT:
+            dep = match.deployment
+            player_label = (
+                f"Player {dep.current_player + 1}" if dep is not None else "Unknown"
+            )
+            return {
+                "state": "deployment",
+                "summary": (
+                    f"Deployment phase. {player_label} is placing models on "
+                    "the table. The projector shows deployment zones and QR "
+                    "detections track model positions."
+                ),
+                "current_options": ["deployment complete", "cancel"],
+                "topics": {
+                    "deployment_complete": "Say 'deployment complete' when all your models are placed in the zone.",
+                    "cancel": "Say 'cancel' to abort deployment.",
+                    "zones": "The projector overlay shows your deployment zone. Models with Advance Deployment get +3 inches of depth.",
                 },
             }
 
@@ -1157,6 +1295,9 @@ class Game(GameBase):
     def get_projector_overlay(self, zone_name: str) -> Optional[np.ndarray]:
         """Get the projector overlay image for a specific zone.
 
+        During the deployment phase, delegates to the Deployment phase's
+        overlay generator to draw deployment zones and model markers.
+
         Args:
             zone_name: Name of the zone to get overlay for.
 
@@ -1164,4 +1305,12 @@ class Game(GameBase):
             numpy.ndarray with shape (height, width, 4) in BGRA format,
             or None if no overlay for this zone.
         """
+        if (
+            self.dialog is not None
+            and self.dialog._match is not None
+            and self.dialog._match.deployment is not None
+        ):
+            zone = self.core.zone_manager.get_zone(zone_name)
+            if zone is not None:
+                return self.dialog._match.deployment.projector_overlay(zone)
         return self.projector_overlays.get(zone_name)
