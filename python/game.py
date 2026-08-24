@@ -436,6 +436,7 @@ class WarmachineDialog(GameDialog):
             narration_service=self._narration_service,
             zone=play_area_zone,
             game_mode=self.game_mode_combo.currentData(),
+            match_threshold=getattr(core, "speech_threshold", 0.7),
             parent=self,
         )
 
@@ -605,9 +606,9 @@ class WarmachineDialog(GameDialog):
         self._deployment_page_index = self.ingame_content_area.addWidget(page)
         self.ingame_content_area.setCurrentIndex(self._deployment_page_index)
 
-    @QtCore.Slot(int, str, object, bool)
+    @QtCore.Slot()
     def _on_deployment_position_updated(
-        self, player: int, model_name: str, position: tuple, in_zone: bool
+        self, player: int, model_name: str, position: object, in_zone: bool
     ) -> None:
         """Update the deployment checklist when a model position changes."""
         if self._deployment_page_index <= 0:

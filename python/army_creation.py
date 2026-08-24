@@ -93,6 +93,7 @@ class ArmyCreation(QtCore.QObject):
         narrator: Any = None,
         narration_engine: Optional[NarrationEngine] = None,
         narration_service: Optional[NarrationService] = None,
+        match_threshold: float = 0.7,
         parent: Optional[QtCore.QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -102,6 +103,7 @@ class ArmyCreation(QtCore.QObject):
         self._narrator = narrator
         self._narration = narration_engine
         self._service = narration_service
+        self._match_threshold: float = match_threshold
         # Async intent-parsing state (used only when a service is present).
         self._awaiting_intent: bool = False
         self._pending_text: str = ""
@@ -253,7 +255,7 @@ class ArmyCreation(QtCore.QObject):
 
     def _find_faction(self, spoken: str) -> Optional[str]:
         """Match spoken text to a faction name using fuzzy matching."""
-        return fuzzy_match_name(spoken, self._all_faction_names(), threshold=0.6)
+        return fuzzy_match_name(spoken, self._all_faction_names(), threshold=self._match_threshold)
 
     def _on_faction_selected(self, faction: str) -> None:
         """Handle faction selection by the current player."""
@@ -576,10 +578,9 @@ class ArmyCreation(QtCore.QObject):
     # Model lookup
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _match_name(spoken: str, candidate: str) -> bool:
+    def _match_name(self, spoken: str, candidate: str) -> bool:
         """Check if *spoken* matches *candidate* using fuzzy matching."""
-        result = fuzzy_match_name(spoken, [candidate], threshold=0.7)
+        result = fuzzy_match_name(spoken, [candidate], threshold=self._match_threshold)
         return result is not None
 
     def _find_model(self, spoken_text: str) -> Optional[ModelStatCard]:
@@ -607,7 +608,7 @@ class ArmyCreation(QtCore.QObject):
             for vn in model.vocal_names:
                 candidates[vn] = model
 
-        best = fuzzy_match_name(spoken_text, list(candidates.keys()), threshold=0.7)
+        best = fuzzy_match_name(spoken_text, list(candidates.keys()), threshold=self._match_threshold)
         if best is not None:
             return candidates[best]
         return None
