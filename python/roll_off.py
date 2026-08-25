@@ -46,8 +46,8 @@ if TYPE_CHECKING:
 _NEGATIVE = {"no", "nope", "cancel", "stop", "abort", "quit"}
 _FIRST_TURN_KEYWORDS = {"first turn", "go first", "first", "turn order"}
 _SIDE_KEYWORDS = {"side", "table side", "table edge", "edge"}
-_NORTH_KEYWORDS = {"north", "top"}
-_SOUTH_KEYWORDS = {"south", "bottom"}
+_LEFT_KEYWORDS = {"left"}
+_RIGHT_KEYWORDS = {"right"}
 
 
 class RollOffState(Enum):
@@ -68,8 +68,8 @@ class RollOff(QtCore.QObject):
     Signals:
         roll_off_complete(dict): Emitted with
             ``{"first_player": int, "sides": {0: str, 1: str}}`` when the
-            roll-off finishes.  ``sides`` maps player index to "north" or
-            "south".
+            roll-off finishes.  ``sides`` maps player index to "left" or
+            "right".
         roll_off_cancelled(): Emitted when the player cancels.
         narrate(str): Text the narrator should speak aloud.
         status_changed(str): Short status string for the UI.
@@ -79,6 +79,9 @@ class RollOff(QtCore.QObject):
     roll_off_cancelled = QtCore.Signal()
     narrate = QtCore.Signal(str)
     status_changed = QtCore.Signal(str)
+
+    # ``sides`` maps player index to "left" or "right", where left is the
+    # table edge near x=0 and right is the opposite edge.
 
     _ROLL_INTENTS = {
         "report_roll": "the player reports the result of their die roll (value = the number rolled)",
@@ -90,8 +93,8 @@ class RollOff(QtCore.QObject):
         "cancel": "cancel and abandon the roll-off",
     }
     _SIDE_INTENTS = {
-        "choose_side_north": "the player chooses the north side of the table",
-        "choose_side_south": "the player chooses the south side of the table",
+        "choose_side_left": "the player chooses the left side of the table",
+        "choose_side_right": "the player chooses the right side of the table",
         "cancel": "cancel and abandon the roll-off",
     }
 
@@ -398,7 +401,7 @@ class RollOff(QtCore.QObject):
             self._state = RollOffState.CHOICE_SIDE
             self._say(
                 f"Player {winner + 1}, which side of the table do you prefer? "
-                "North or south?",
+                "Left or right?",
             )
             self.status_changed.emit(
                 f"Roll-off: Player {winner + 1} picks a side…"
@@ -429,21 +432,21 @@ class RollOff(QtCore.QObject):
         winner = self._winner
         loser = 1 if winner == 0 else 0
 
-        chose_north = intent == "choose_side_north" or any(
-            kw in lower for kw in _NORTH_KEYWORDS
+        chose_left = intent == "choose_side_left" or any(
+            kw in lower for kw in _LEFT_KEYWORDS
         )
-        chose_south = intent == "choose_side_south" or any(
-            kw in lower for kw in _SOUTH_KEYWORDS
+        chose_right = intent == "choose_side_right" or any(
+            kw in lower for kw in _RIGHT_KEYWORDS
         )
 
-        if chose_north and not chose_south:
-            self._sides[winner] = "north"
-            self._sides[loser] = "south"
-        elif chose_south and not chose_north:
-            self._sides[winner] = "south"
-            self._sides[loser] = "north"
+        if chose_left and not chose_right:
+            self._sides[winner] = "left"
+            self._sides[loser] = "right"
+        elif chose_right and not chose_left:
+            self._sides[winner] = "right"
+            self._sides[loser] = "left"
         else:
-            self._say("Please say 'north' or 'south'.")
+            self._say("Please say 'left' or 'right'.")
             return
 
         self._finish()
@@ -482,7 +485,7 @@ class RollOff(QtCore.QObject):
         self._state = RollOffState.CHOICE_SIDE
         self._say(
             f"Player {loser + 1}, which side of the table do you prefer? "
-            "North or south?",
+            "Left or right?",
         )
         self.status_changed.emit(
             f"Roll-off: Player {loser + 1} picks a side…"

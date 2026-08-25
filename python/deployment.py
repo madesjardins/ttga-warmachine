@@ -266,19 +266,19 @@ class Deployment(QtCore.QObject):
     def _zone_rect_in(self, player: int) -> tuple[float, float, float, float]:
         """Return (x_min, y_min, x_max, y_max) in inches for *player*'s zone.
 
-        The rectangle spans the full board width.  Depth (from the player's
+        The rectangle spans the full board height.  Depth (from the player's
         board edge) is the base deployment depth; per-model Advance Deployment
         bonus is handled in :meth:`_is_in_zone`.
         """
-        side = self._sides.get(player, "north")
+        side = self._sides.get(player, "left")
         board_w = self._zone.width
         board_h = self._zone.height
         depth = self._deployment_depth
 
-        if side == "north":
-            return (0.0, 0.0, board_w, depth)
+        if side == "left":
+            return (0.0, 0.0, depth, board_h)
         else:
-            return (0.0, board_h - depth, board_w, board_h)
+            return (board_w - depth, 0.0, board_w, board_h)
 
     def _is_in_zone(self, player: int, status: ModelDeploymentStatus) -> bool:
         """Check if *status*'s position is inside the player's deployment zone.
@@ -290,7 +290,7 @@ class Deployment(QtCore.QObject):
             return False
 
         x, y = status.position_in
-        side = self._sides.get(player, "north")
+        side = self._sides.get(player, "left")
         depth = self._deployment_depth + (
             _ADVANCE_DEPLOY_BONUS if status.advance_deploy else 0.0
         )
@@ -301,10 +301,10 @@ class Deployment(QtCore.QObject):
         if not (0.0 <= x <= board_w and 0.0 <= y <= board_h):
             return False
 
-        if side == "north":
-            return y <= depth
+        if side == "left":
+            return x <= depth
         else:
-            return y >= (board_h - depth)
+            return x >= (board_w - depth)
 
     # ------------------------------------------------------------------
     # Detection handling
@@ -476,8 +476,8 @@ class Deployment(QtCore.QObject):
         """Announce a player's deployment turn and enter TRACKING."""
         self._state = DeploymentState.ANNOUNCE
         player_label = f"Player {player + 1}"
-        side = self._sides.get(player, "north")
-        side_label = "north" if side == "north" else "south"
+        side = self._sides.get(player, "left")
+        side_label = "left" if side == "left" else "right"
         depth = self._deployment_depth
         model_count = len(self._statuses[player])
 
@@ -524,19 +524,19 @@ class Deployment(QtCore.QObject):
 
         # Draw both players' zone rectangles.
         for p_idx in (0, 1):
-            side = self._sides.get(p_idx, "north")
+            side = self._sides.get(p_idx, "left")
             depth = self._deployment_depth
             depth_px = int(depth * res)
 
-            if side == "north":
-                y1 = 0
-                y2 = depth_px
+            if side == "left":
+                x1 = 0
+                x2 = depth_px
             else:
-                y2 = height_px
-                y1 = height_px - depth_px
+                x2 = width_px
+                x1 = width_px - depth_px
 
-            x1 = 0
-            x2 = width_px
+            y1 = 0
+            y2 = height_px
 
             fill_color = _P1_ZONE_COLOR if p_idx == 0 else _P2_ZONE_COLOR
             border_color = _P1_BORDER_COLOR if p_idx == 0 else _P2_BORDER_COLOR
