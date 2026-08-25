@@ -436,6 +436,7 @@ class WarmachineDialog(GameDialog):
             narration_service=self._narration_service,
             zone=play_area_zone,
             game_mode=self.game_mode_combo.currentData(),
+            match_threshold=getattr(core, "speech_threshold", 0.7),
             parent=self,
         )
 
@@ -522,6 +523,8 @@ class WarmachineDialog(GameDialog):
     @QtCore.Slot(str)
     def _on_phase_changed(self, phase_value: str) -> None:
         self.phase_title_label.setText(phase_value)
+        # Refresh STT vocabulary for the new phase context.
+        self._refresh_stt_vocabulary()
 
     @QtCore.Slot()
     def _on_match_ended(self) -> None:
@@ -553,6 +556,9 @@ class WarmachineDialog(GameDialog):
         ac.qr_progress.connect(self._on_army_qr_progress)
         ac.model_cancelled.connect(self._on_army_model_cancelled)
         ac.status_changed.connect(self._on_ingame_status)
+        ac.faction_selected.connect(self._on_faction_selected)
+        # Refresh vocabulary for the faction-selection sub-step.
+        self._refresh_stt_vocabulary()
 
     @QtCore.Slot(str)
     def _wire_roll_off(self, phase_value: str) -> None:
@@ -600,9 +606,9 @@ class WarmachineDialog(GameDialog):
         self._deployment_page_index = self.ingame_content_area.addWidget(page)
         self.ingame_content_area.setCurrentIndex(self._deployment_page_index)
 
-    @QtCore.Slot(int, str, object, bool)
+    @QtCore.Slot()
     def _on_deployment_position_updated(
-        self, player: int, model_name: str, position: tuple, in_zone: bool
+        self, player: int, model_name: str, position: object, in_zone: bool
     ) -> None:
         """Update the deployment checklist when a model position changes."""
         if self._deployment_page_index <= 0:
@@ -670,6 +676,13 @@ class WarmachineDialog(GameDialog):
         target.addItem(item)
         target.scrollToItem(item)
         self._update_army_points()
+        # Refresh STT vocabulary to include the newly added model's names.
+        self._refresh_stt_vocabulary()
+
+    @QtCore.Slot(int, str)
+    def _on_faction_selected(self, player_index: int, faction: str) -> None:
+        """Handle faction selection — refresh STT vocabulary for the new context."""
+        self._refresh_stt_vocabulary()
 
     @QtCore.Slot(int, list, int)
     def _on_army_qr_progress(
@@ -729,6 +742,13 @@ class WarmachineDialog(GameDialog):
         label = f"*{name}" if self._current_db.is_dirty else name
         self.models_database_combo.setItemText(idx, label)
 
+    def _refresh_stt_vocabulary(self) -> None:
+        """Push current DB vocabulary to the core's STT engine."""
+        if self.game_instance is not None:
+            self.game_instance.core.set_stt_vocabulary(
+                self.game_instance.get_stt_vocabulary()
+            )
+
     def _check_unsaved_and_confirm(self) -> bool:
         """Return True if it is safe to proceed (no unsaved changes or user confirmed).
 
@@ -774,6 +794,7 @@ class WarmachineDialog(GameDialog):
             return
         self._set_db_controls_enabled(True)
         self._refresh_models_list()
+        self._refresh_stt_vocabulary()
 
     @QtCore.Slot()
     def _on_new_database(self) -> None:
@@ -801,6 +822,7 @@ class WarmachineDialog(GameDialog):
         self.models_database_combo.blockSignals(False)
         self._set_db_controls_enabled(True)
         self._refresh_models_list()
+        self._refresh_stt_vocabulary()
 
     @QtCore.Slot()
     def _on_save_database(self) -> None:
@@ -839,6 +861,7 @@ class WarmachineDialog(GameDialog):
             return
         self._update_db_title()
         self._refresh_models_list()
+        self._refresh_stt_vocabulary()
 
     # ------------------------------------------------------------------
     # Model list management
@@ -1039,6 +1062,101 @@ class Game(GameBase):
     def on_speech_command(self, text: str) -> None:
         """Route recognised speech to the event manager."""
         self.event_manager.route_speech(text)
+
+    def get_stt_vocabulary(self) -> list[str]:
+        """Return context-aware vocabulary for Whisper recognition biasing.
+
+        Builds a targeted vocabulary based on the current match phase and
+        state, rather than dumping the entire database.  This keeps the
+        Whisper ``initial_prompt`` small and focused for better accuracy.
+
+        Contexts:
+        - No match / setup: faction names + common commands.
+        - Army creation (faction select): faction names only.
+        - Army creation (model select): model names from selected faction
+          + Mercenaries + command words.
+        - Deployment / battle: model names from both armies + command words
+          + special action names from active models.
+        """
+        from .model_stat_card import Faction
+
+        # Common command words always included.
+        commands = ["army completed", "cancel", "repeat", "undo", "help"]
+
+        # No match running — just faction names + commands.
+        if self.dialog is None or self.dialog._match is None:
+            return [f.value for f in Faction] + commands
+
+        match = self.dialog._match
+        phase = match.phase
+
+        # --- Setup phase: minimal vocabulary ---
+        if phase is None or phase == MatchPhase.SETUP:
+            return commands + ["single match", "yes", "no", "confirm"]
+
+        # --- Army creation phase ---
+        if phase == MatchPhase.ARMY_CREATION:
+            ac = match.army_creation
+            if ac is None:
+                return commands
+
+            # Faction selection sub-step: only faction names.
+            if ac.selecting_faction:
+                return [f.value for f in Faction] + commands
+
+            # Model selection: names from the selected faction + Mercenaries.
+            faction = ac.factions[ac.current_player]
+            if faction is not None and self.dialog._current_db is not None:
+                models = self.dialog._current_db.models_by_faction(
+                    faction, include_mercenaries=True
+                )
+                names: list[str] = []
+                for m in models:
+                    names.append(m.name)
+                    if m.short_name:
+                        names.append(m.short_name)
+                    names.extend(m.vocal_names)
+                return names + commands
+
+            # Fallback: all model names (no faction selected yet).
+            if self.dialog._current_db is not None:
+                names = []
+                for m in self.dialog._current_db.all_models():
+                    names.append(m.name)
+                    if m.short_name:
+                        names.append(m.short_name)
+                return names + commands
+            return commands
+
+        # --- Roll-off phase ---
+        if phase == MatchPhase.ROLL_OFF:
+            return commands + ["roll", "reroll", "higher", "lower"]
+
+        # --- Deployment / battle phases ---
+        # Include model names from both armies + special action names.
+        if self.dialog._match is not None:
+            ac = self.dialog._match.army_creation
+            if ac is not None:
+                names: list[str] = []
+                for army in ac.armies:
+                    for m in army:
+                        names.append(m.name)
+                        if m.short_name:
+                            names.append(m.short_name)
+                        names.extend(m.vocal_names)
+                        # Include special action names for battle commands.
+                        for sa in m.special_actions:
+                            if sa.name:
+                                names.append(sa.name)
+                # Common battle commands.
+                battle_commands = [
+                    "attack", "charge", "run", "slam", "trample",
+                    "advance", "aim", "upkeep", "cast", "feat",
+                    "move", "engage", "disengage", "pass",
+                ]
+                return names + battle_commands + commands
+
+        return commands
 
     def get_help_context(self) -> dict:
         """Return state-aware help context for the HelpAgent."""

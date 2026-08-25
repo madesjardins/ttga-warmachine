@@ -248,5 +248,24 @@ class ModelDatabase:
         """Return all models as a list in insertion order."""
         return list(self._models.values())
 
+    def models_by_faction(self, faction: str, *, include_mercenaries: bool = True) -> list[ModelStatCard]:
+        """Return models belonging to *faction*.
+
+        Args:
+            faction: Faction name (e.g. "Khador", "Cygnar").
+            include_mercenaries: If True, also include models whose
+                faction is "Mercenaries" (they can join any army).
+
+        Returns:
+            List of :class:`ModelStatCard` matching the faction.
+        """
+        result: list[ModelStatCard] = []
+        for model in self._models.values():
+            if model.faction == faction:
+                result.append(model)
+            elif include_mercenaries and model.faction == "Mercenaries":
+                result.append(model)
+        return result
+
     def __len__(self) -> int:
         return len(self._models)

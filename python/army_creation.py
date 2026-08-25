@@ -25,6 +25,8 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from PySide6 import QtCore
 
+from ttga.speech_recognition import fuzzy_match_name
+
 if TYPE_CHECKING:
     from ttga.narration_engine import NarrationEngine
     from ttga.narration_service import NarrationService
@@ -32,7 +34,7 @@ if TYPE_CHECKING:
     from .event_manager import GameEventManager
     from .game_log import GameLog
     from .model_database import ModelDatabase
-    from .model_stat_card import ModelStatCard
+    from .model_stat_card import Faction, ModelStatCard
 
 
 class ArmyCreation(QtCore.QObject):
@@ -58,6 +60,7 @@ class ArmyCreation(QtCore.QObject):
     phase_completed = QtCore.Signal()
     narrate = QtCore.Signal(str)
     status_changed = QtCore.Signal(str)
+    faction_selected = QtCore.Signal(int, str)
 
     # Allowed intents (name -> description) for the model-adding step, supplied
     # to the NarrationEngine for NLU. Python remains authoritative: an extracted
@@ -72,6 +75,16 @@ class ArmyCreation(QtCore.QObject):
         ),
     }
 
+    _FACTION_INTENTS = {
+        "select_faction": (
+            "the player named a faction for their army "
+            "(value = the spoken faction name)"
+        ),
+    }
+
+    # Common command words always included in vocabulary.
+    _COMMAND_WORDS = ["army completed", "cancel", "repeat", "undo"]
+
     def __init__(
         self,
         db: ModelDatabase,
@@ -80,6 +93,7 @@ class ArmyCreation(QtCore.QObject):
         narrator: Any = None,
         narration_engine: Optional[NarrationEngine] = None,
         narration_service: Optional[NarrationService] = None,
+        match_threshold: float = 0.7,
         parent: Optional[QtCore.QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -89,6 +103,7 @@ class ArmyCreation(QtCore.QObject):
         self._narrator = narrator
         self._narration = narration_engine
         self._service = narration_service
+        self._match_threshold: float = match_threshold
         # Async intent-parsing state (used only when a service is present).
         self._awaiting_intent: bool = False
         self._pending_text: str = ""
@@ -99,6 +114,10 @@ class ArmyCreation(QtCore.QObject):
         self._qr_codes: list[list[list[str]]] = [[], []]
         self._current_player: int = 0
         self._active: bool = False
+        # Faction selected by each player (cached for the duration of the match).
+        self._factions: list[Optional[str]] = [None, None]
+        # Whether we're in the faction-selection sub-step.
+        self._selecting_faction: bool = False
 
         # QR-collection state for the model currently being added.
         self._collecting: bool = False
@@ -127,6 +146,16 @@ class ArmyCreation(QtCore.QObject):
         """Index (0 or 1) of the player currently adding models."""
         return self._current_player
 
+    @property
+    def factions(self) -> list[Optional[str]]:
+        """Faction selected by each player (or None if not yet selected)."""
+        return self._factions
+
+    @property
+    def selecting_faction(self) -> bool:
+        """True while the current player is choosing their faction."""
+        return self._selecting_faction
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -140,13 +169,15 @@ class ArmyCreation(QtCore.QObject):
         self._collected_qr = []
         self._used_qr = set()
         self._awaiting_intent = False
+        self._factions = [None, None]
+        self._selecting_faction = False
         if self._service is not None:
             self._service.narrated.connect(self._on_narrated)
             self._service.intent_parsed.connect(self._on_intent_parsed)
             self._service_connected = True
         self._event_manager.push_speech_handler(self._on_speech)
-        self._say("Army creation begins.", use_persona=True)
-        self._prompt_next_model()
+        self._say("Army creation begins.", use_persona=False)
+        self._begin_faction_selection()
 
     def stop(self) -> None:
         """Abort the army creation phase early."""
@@ -203,6 +234,42 @@ class ArmyCreation(QtCore.QObject):
         self.narrate.emit(text)
 
     # ------------------------------------------------------------------
+    # Faction selection
+    # ------------------------------------------------------------------
+
+    def _begin_faction_selection(self) -> None:
+        """Ask the current player to choose their faction."""
+        self._selecting_faction = True
+        player_label = f"Player {self._current_player + 1}"
+        self._say(
+            f"{player_label}, which faction will your army be? "
+            "Speak the name of your faction.",
+            use_persona=False,
+        )
+        self.status_changed.emit(f"Waiting for {player_label} faction…")
+
+    def _all_faction_names(self) -> list[str]:
+        """Return all faction names from the Faction enum."""
+        from .model_stat_card import Faction
+        return [f.value for f in Faction]
+
+    def _find_faction(self, spoken: str) -> Optional[str]:
+        """Match spoken text to a faction name using fuzzy matching."""
+        return fuzzy_match_name(spoken, self._all_faction_names(), threshold=self._match_threshold)
+
+    def _on_faction_selected(self, faction: str) -> None:
+        """Handle faction selection by the current player."""
+        self._factions[self._current_player] = faction
+        self._selecting_faction = False
+        player_label = f"Player {self._current_player + 1}"
+        self._say(
+            f"{player_label} has chosen the faction {faction}.",
+            use_persona=False,
+        )
+        self.faction_selected.emit(self._current_player, faction)
+        self._prompt_next_model()
+
+    # ------------------------------------------------------------------
     # Prompting
     # ------------------------------------------------------------------
 
@@ -218,7 +285,7 @@ class ArmyCreation(QtCore.QObject):
             text = (
                 f"{player_label}, speak the name of the next model or unit."
             )
-        self._say(text, use_persona=True)
+        self._say(text, use_persona=False)
         self.status_changed.emit(f"Waiting for {player_label}…")
 
     # ------------------------------------------------------------------
@@ -242,6 +309,18 @@ class ArmyCreation(QtCore.QObject):
                 self._say(
                     "Please complete current model or unit QR registration "
                     "before adding another model or unit."
+                )
+            return
+
+        # --- Faction selection sub-step ---
+        if self._selecting_faction:
+            faction = self._find_faction(text.strip())
+            if faction is not None:
+                self._on_faction_selected(faction)
+            else:
+                self._say(
+                    f"Faction '{text}' was not recognized. "
+                    "Please try again."
                 )
             return
 
@@ -480,16 +559,16 @@ class ArmyCreation(QtCore.QObject):
         self._say(
             f"{player_label}'s army is complete with {count} "
             f"{'entry' if count == 1 else 'entries'}.",
-            use_persona=True,
+            use_persona=False,
         )
 
         if self._current_player == 0:
             self._current_player = 1
-            self._prompt_next_model()
+            self._begin_faction_selection()
         else:
             self._say(
                 "Both armies are now complete. Army creation is finished.",
-                use_persona=True,
+                use_persona=False,
             )
             self._active = False
             self._event_manager.pop_speech_handler(self._on_speech)
@@ -499,16 +578,37 @@ class ArmyCreation(QtCore.QObject):
     # Model lookup
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _match_name(spoken: str, candidate: str) -> bool:
-        return spoken.lower() == candidate.lower()
+    def _match_name(self, spoken: str, candidate: str) -> bool:
+        """Check if *spoken* matches *candidate* using fuzzy matching."""
+        result = fuzzy_match_name(spoken, [candidate], threshold=self._match_threshold)
+        return result is not None
 
     def _find_model(self, spoken_text: str) -> Optional[ModelStatCard]:
-        """Find a model whose name or vocal_names match *spoken_text*."""
-        for model in self._db.all_models():
-            if self._match_name(spoken_text, model.name):
-                return model
+        """Find a model whose name or vocal_names match *spoken_text*.
+
+        Uses fuzzy matching with a 0.7 similarity threshold, so minor
+        misrecognitions (e.g. "the Winter Guard" → "Winter Guard")
+        still match correctly.
+
+        If the current player has selected a faction, only models from
+        that faction (plus Mercenaries) are considered.
+        """
+        # Determine the candidate pool: faction-filtered if a faction
+        # has been selected, otherwise all models.
+        faction = self._factions[self._current_player]
+        if faction is not None:
+            pool = self._db.models_by_faction(faction, include_mercenaries=True)
+        else:
+            pool = self._db.all_models()
+
+        # Build a mapping from all candidate names to their model cards.
+        candidates: dict[str, ModelStatCard] = {}
+        for model in pool:
+            candidates[model.name] = model
             for vn in model.vocal_names:
-                if self._match_name(spoken_text, vn):
-                    return model
+                candidates[vn] = model
+
+        best = fuzzy_match_name(spoken_text, list(candidates.keys()), threshold=self._match_threshold)
+        if best is not None:
+            return candidates[best]
         return None

@@ -72,6 +72,7 @@ class Match(QtCore.QObject):
         zone: Optional[Zone] = None,
         *,
         game_mode: Optional[str] = None,
+        match_threshold: float = 0.7,
         parent: Optional[QtCore.QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -82,6 +83,7 @@ class Match(QtCore.QObject):
         self._service = narration_service
         self._zone = zone
         self._game_mode = game_mode
+        self._match_threshold: float = match_threshold
         self._phase: Optional[MatchPhase] = None
         self._log = GameLog(parent=self)
         self._setup_flow: Optional[SetupFlow] = None
@@ -196,6 +198,7 @@ class Match(QtCore.QObject):
             narrator=self._narrator,
             narration_engine=self._narration,
             narration_service=self._service,
+            match_threshold=self._match_threshold,
             parent=self,
         )
         self._army_creation.phase_completed.connect(
