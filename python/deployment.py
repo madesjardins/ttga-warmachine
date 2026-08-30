@@ -37,6 +37,7 @@ import cv2
 import numpy as np
 from PySide6 import QtCore
 
+from .game_objects import InGameArmy, InGameModel
 from .model_stat_card import BASE_SIZES, ModelAdvantage, ModelStatCard
 from .nemesis_deployment import get_strategy
 
@@ -128,6 +129,7 @@ class DeploymentState(Enum):
     IDLE = auto()
     ANNOUNCE = auto()
     TRACKING = auto()
+    NEMESIS_DEPLOYING = auto()
     DONE = auto()
 
 
@@ -233,6 +235,7 @@ class Deployment(QtCore.QObject):
         db: Optional[ModelDatabase] = None,
         nemesis_player: Optional[int] = None,
         nemesis_deployment_strategy: Optional[str] = None,
+        in_game_armies: Optional[list[InGameArmy]] = None,
         *,
         parent: Optional[QtCore.QObject] = None,
     ) -> None:
@@ -253,6 +256,9 @@ class Deployment(QtCore.QObject):
         # player index: one list of (x, y) per physical model, parallel to
         # that player's statuses/positions.
         self._suggested_positions: dict[int, list[list[tuple[float, float]]]] = {}
+        # Sequential Nemesis deployment state.
+        self._nemesis_deploy_queue: list[tuple[int, int, str]] = []
+        self._nemesis_deploy_current: Optional[tuple[int, int, str]] = None
 
         self._state: DeploymentState = DeploymentState.IDLE
         self._current_player: int = first_player
@@ -287,6 +293,15 @@ class Deployment(QtCore.QObject):
             for m_idx, status in enumerate(player_statuses):
                 for code_idx, code in enumerate(status.qr_codes):
                     self._qr_lookup[code] = (p_idx, m_idx, code_idx)
+
+        # Build a QR-code -> InGameModel lookup for position syncing.
+        self._in_game_armies = in_game_armies
+        self._in_game_model_lookup: dict[str, InGameModel] = {}
+        if in_game_armies is not None:
+            for army in in_game_armies:
+                for model in army.all_models:
+                    if model.qr_code:
+                        self._in_game_model_lookup[model.qr_code] = model
 
         # Overlay cache.
         self._overlay_cache: Optional[np.ndarray] = None
@@ -525,6 +540,10 @@ class Deployment(QtCore.QObject):
             y_in = game_px[1] / res
 
             status.positions[code_idx] = (x_in, y_in)
+            # Sync position to the InGameModel if available.
+            in_game_model = self._in_game_model_lookup.get(msg)
+            if in_game_model is not None:
+                in_game_model.position = (x_in, y_in)
             updated.append((p_idx, m_idx, code_idx))
 
         if updated:
@@ -541,6 +560,17 @@ class Deployment(QtCore.QObject):
                     status.positions[code_idx],
                     status.in_zone,
                 )
+
+        # Advance Nemesis sequential deployment if the current model was detected.
+        if (self._state == DeploymentState.NEMESIS_DEPLOYING
+                and self._nemesis_deploy_current is not None
+                and updated):
+            waiting_qr = self._nemesis_deploy_current[2]
+            for p, m, c in updated:
+                status_qr = self._statuses[p][m].qr_codes
+                if c < len(status_qr) and status_qr[c] == waiting_qr:
+                    self._nemesis_deploy_next(self._current_player)
+                    break
 
         # Check all-placed status for current player.
         self._check_all_placed(self._current_player)
@@ -682,13 +712,14 @@ class Deployment(QtCore.QObject):
         )
 
         if is_nemesis_turn and model_count > 0:
-            self._generate_nemesis_suggestions(player)
-            if self._suggested_positions.get(player):
-                self._say(
-                    "Nemesis has plotted its deployment. Ghost markers on "
-                    "the table show where to place its models.",
-                    use_persona=False,
-                )
+            self._say(
+                f"Nemesis will now deploy its army on the {side_label} edge. "
+                f"{model_count} {'model' if model_count == 1 else 'models'} to place.",
+                use_persona=False,
+            )
+            self.status_changed.emit("Deployment: Nemesis placing models…")
+            self._begin_nemesis_sequential_deploy(player)
+            return
 
         self._state = DeploymentState.TRACKING
 
@@ -718,6 +749,51 @@ class Deployment(QtCore.QObject):
             for status in self._statuses[player]
         ]
         self._suggested_positions[player] = strategy(zone_rect, units)
+        self._overlay_dirty = True
+
+    # ------------------------------------------------------------------
+    # Nemesis sequential deployment
+    # ------------------------------------------------------------------
+
+    def _begin_nemesis_sequential_deploy(self, player: int) -> None:
+        """Start the sequential one-model-at-a-time deployment for Nemesis."""
+        self._generate_nemesis_suggestions(player)
+        self._nemesis_deploy_queue = []
+        for m_idx, status in enumerate(self._statuses[player]):
+            for code_idx, qr in enumerate(status.qr_codes):
+                self._nemesis_deploy_queue.append((m_idx, code_idx, qr))
+        self._nemesis_deploy_current = None
+        self._state = DeploymentState.NEMESIS_DEPLOYING
+        self._nemesis_deploy_next(player)
+
+    def _nemesis_deploy_next(self, player: int) -> None:
+        """Announce and show the circle for the next Nemesis model, or finish."""
+        if not self._nemesis_deploy_queue:
+            self._nemesis_deploy_current = None
+            self._say(
+                "All Nemesis models have been placed. "
+                "Deployment for Nemesis is complete.",
+                use_persona=False,
+            )
+            self._advance_or_finish()
+            return
+
+        m_idx, code_idx, qr = self._nemesis_deploy_queue.pop(0)
+        self._nemesis_deploy_current = (m_idx, code_idx, qr)
+        status = self._statuses[player][m_idx]
+
+        # Get the identification label from the InGameModel.
+        label = ""
+        in_game_model = self._in_game_model_lookup.get(qr)
+        if in_game_model is not None:
+            label = in_game_model.label
+
+        model_name = status.card.name
+        self._say(
+            f"Place the {model_name}, model {label}. "
+            "A circle on the table shows where to position it.",
+            use_persona=False,
+        )
         self._overlay_dirty = True
 
     # ------------------------------------------------------------------
@@ -764,22 +840,31 @@ class Deployment(QtCore.QObject):
             # Solid border.
             cv2.rectangle(overlay, (x1, y1), (x2, y2), border_color, 2)
 
-        # Draw Nemesis's suggested ("ghost") positions for the currently
-        # deploying player, if any were generated for this turn.
-        suggestions = self._suggested_positions.get(self._current_player)
-        if suggestions:
-            for status, unit_positions in zip(
-                self._statuses[self._current_player], suggestions
-            ):
-                for idx, (x, y) in enumerate(unit_positions):
-                    x_px = int(x * res)
-                    y_px = int(y * res)
-                    r_px = max(
-                        _MARKER_RADIUS, int(status.radius_in(idx) * res)
-                    )
-                    cv2.circle(
-                        overlay, (x_px, y_px), r_px, _SUGGESTED_COLOR, 2
-                    )
+        # Draw a hollow circle for the current Nemesis model being deployed.
+        if (self._state == DeploymentState.NEMESIS_DEPLOYING
+                and self._nemesis_deploy_current is not None):
+            m_idx, code_idx, _ = self._nemesis_deploy_current
+            suggestions = self._suggested_positions.get(self._current_player)
+            if (suggestions and m_idx < len(suggestions)
+                    and code_idx < len(suggestions[m_idx])):
+                x, y = suggestions[m_idx][code_idx]
+                status = self._statuses[self._current_player][m_idx]
+                base_mm = (
+                    status.base_sizes_mm[code_idx]
+                    if code_idx < len(status.base_sizes_mm)
+                    else BASE_SIZES[0]
+                )
+                # Diameter = base + 4 mm -> radius in inches.
+                radius_in = (base_mm + 4.0) / (2.0 * _MM_PER_IN)
+                # Thickness = 2 mm -> pixels.
+                thickness_px = max(1, int(2.0 / _MM_PER_IN * res))
+                x_px = int(x * res)
+                y_px = int(y * res)
+                r_px = max(_MARKER_RADIUS, int(radius_in * res))
+                cv2.circle(
+                    overlay, (x_px, y_px), r_px,
+                    _SUGGESTED_COLOR, thickness_px,
+                )
 
         # Draw a base-sized marker per physical model, coloured by that
         # specific model's own rule validity (containment, cohesion, overlap).

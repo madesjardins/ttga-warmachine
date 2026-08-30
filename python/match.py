@@ -29,6 +29,7 @@ from PySide6 import QtCore
 from .army_creation import ArmyCreation
 from .deployment import Deployment
 from .game_log import GameLog
+from .game_objects import InGameArmy, create_armies_from_creation
 from .match_settings import NEMESIS_PLAYER_INDEX
 from .roll_off import RollOff
 from .setup_flow import SetupFlow
@@ -92,6 +93,7 @@ class Match(QtCore.QObject):
         self._army_creation: Optional[ArmyCreation] = None
         self._roll_off: Optional[RollOff] = None
         self._deployment: Optional[Deployment] = None
+        self._in_game_armies: list[InGameArmy] = []
         self._roll_off_result: dict = {}
         self._config: dict = {}
 
@@ -133,6 +135,11 @@ class Match(QtCore.QObject):
     def deployment(self) -> Optional[Deployment]:
         """The :class:`Deployment` instance (available during that phase)."""
         return self._deployment
+
+    @property
+    def in_game_armies(self) -> list[InGameArmy]:
+        """In-game army objects (available after army creation, before deployment)."""
+        return self._in_game_armies
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -276,6 +283,13 @@ class Match(QtCore.QObject):
             if self._match_settings is not None
             else None
         )
+        # Instantiate in-game army objects from army-creation results.
+        self._in_game_armies = create_armies_from_creation(
+            armies=self._army_creation.armies,
+            qr_codes=self._army_creation.qr_codes,
+            factions=self._army_creation.factions,
+            db=self._db,
+        )
         self._deployment = Deployment(
             armies=self._army_creation.armies,
             qr_codes=self._army_creation.qr_codes,
@@ -292,6 +306,7 @@ class Match(QtCore.QObject):
             db=self._db,
             nemesis_player=nemesis_player,
             nemesis_deployment_strategy=nemesis_strategy,
+            in_game_armies=self._in_game_armies,
             parent=self,
         )
         self._deployment.phase_completed.connect(self._on_deployment_done)
@@ -304,7 +319,30 @@ class Match(QtCore.QObject):
     @QtCore.Slot()
     def _on_deployment_done(self) -> None:
         self._log.system("Deployment phase is complete.")
+        self._log.system(
+            "Armies are deployed. The match is ready to begin Round 1."
+        )
+        self._say_match(
+            "Both armies are deployed and ready for battle. "
+            "The first round is about to begin.",
+        )
+        # The match pauses here, right before the start of the first round.
         # Future: transition to Round 1 / turn structure.
+
+    def _say_match(self, text: str, *, use_persona: bool = False) -> None:
+        """Speak narration text using available narrator infrastructure."""
+        if self._service is not None:
+            self._service.speak(text, use_persona=use_persona)
+            return
+        spoken = text
+        if use_persona and self._narration is not None:
+            spoken = self._narration.phrase(text)
+        self._log.narrate(spoken)
+        if self._narrator is not None:
+            try:
+                self._narrator.synthesize_and_play(spoken)
+            except Exception:
+                pass
 
     @QtCore.Slot()
     def _on_deployment_cancelled(self) -> None:
