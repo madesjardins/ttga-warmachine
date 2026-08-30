@@ -1,0 +1,32 @@
+# Simple 10-point match settings for the Warmachine game.
+#
+# Each file in this folder defines one complete, shareable match
+# configuration selectable from the "Game Mode" dropdown. Feel free to copy
+# this file to add your own presets or house rules.
+
+id: simple_10pts
+display_name: "Simple - 10 pts"
+points: 10
+
+deployment:
+  # Deployment zone depth (inches) for whichever player deploys first.
+  first_player_depth_in: 7.0
+  # Deployment zone depth (inches) for the player who deploys second.
+  second_player_depth_in: 10.0
+
+# Nemesis is the CPU opponent. The narrator reports Nemesis's decisions
+# like a commentator; the human player always physically places Nemesis's
+# models (with their tracking QR codes) on the table either way.
+nemesis:
+  # If true, Nemesis picks its own army list instead of the player
+  # choosing it by voice.
+  chooses_army: false
+  # If true, Nemesis decides where its own models deploy (per
+  # deployment_strategy below); the player still physically places them.
+  chooses_deployment: false
+  # Strategy Nemesis uses to pick deployment positions when
+  # chooses_deployment is true. Only "random" is implemented for now.
+  deployment_strategy: random
+
+# NOTE: The Advance Deployment rule (+3" to a model's zone depth) is
+# currently handled in code and is not yet configurable from this file.

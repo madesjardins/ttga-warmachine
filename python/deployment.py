@@ -37,7 +37,8 @@ import cv2
 import numpy as np
 from PySide6 import QtCore
 
-from .model_stat_card import ModelAdvantage, ModelStatCard
+from .model_stat_card import BASE_SIZES, ModelAdvantage, ModelStatCard
+from .nemesis_deployment import get_strategy
 
 if TYPE_CHECKING:
     from ttga.narration_engine import NarrationEngine
@@ -47,12 +48,68 @@ if TYPE_CHECKING:
 
     from .event_manager import GameEventManager
     from .game_log import GameLog
+    from .model_database import ModelDatabase
 
 
 _NEGATIVE = {"no", "nope", "cancel", "stop", "abort", "quit"}
 _COMPLETE_KEYWORDS = {"deployment complete", "deploy complete", "done", "finished", "complete"}
 
 _ADVANCE_DEPLOY_BONUS = 3.0
+
+# Maximum distance (inches) allowed between any two models in the same unit.
+_UNIT_COHESION_IN = 3.0
+
+_MM_PER_IN = 25.4
+
+
+def _mm_to_in(mm: float) -> float:
+    """Convert millimetres to inches."""
+    return mm / _MM_PER_IN
+
+
+def _distance(a: tuple[float, float], b: tuple[float, float]) -> float:
+    """Euclidean distance between two (x, y) points in the same units."""
+    return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
+
+
+def _resolve_base_sizes_mm(
+    card: ModelStatCard, db: Optional[ModelDatabase], count: int
+) -> list[int]:
+    """Return a base diameter (mm) for each of *count* physical models on *card*.
+
+    Non-unit cards use their own :attr:`ModelStatCard.base_size` for every
+    physical model. Unit cards list their composition in
+    :attr:`ModelStatCard.troopers` (model name + quantity); each trooper
+    type's base size is looked up in *db*. QR codes are registered in
+    presentation order, not tied to a specific trooper type, so this is an
+    approximation: the expanded trooper list order is used as a best-effort
+    match to the registered QR order.
+
+    Args:
+        card: The army entry (single model or unit).
+        db: Model database used to resolve trooper base sizes. May be
+            ``None``, in which case the default base size is used.
+        count: Number of physical models (QR codes) to produce sizes for.
+
+    Returns:
+        List of *count* base diameters in millimetres.
+    """
+    if not card.troopers:
+        size = card.base_size or BASE_SIZES[0]
+        return [size] * count
+
+    sizes: list[int] = []
+    for trooper in card.troopers:
+        model = db.get_model(trooper.model_name) if db is not None else None
+        size = model.base_size if model is not None else BASE_SIZES[0]
+        sizes.extend([size] * max(1, trooper.quantity))
+
+    if not sizes:
+        sizes = [BASE_SIZES[0]]
+    if len(sizes) < count:
+        sizes.extend([sizes[-1]] * (count - len(sizes)))
+    return sizes[:count]
+
 
 # Overlay colours (BGRA).
 _P1_ZONE_COLOR = (255, 100, 100, 40)       # translucent blue
@@ -62,6 +119,7 @@ _P2_BORDER_COLOR = (80, 80, 255, 200)      # solid red
 _MARKER_IN_ZONE = (100, 255, 100, 220)     # green
 _MARKER_OUT_ZONE = (100, 100, 255, 220)    # red
 _MARKER_RADIUS = 6
+_SUGGESTED_COLOR = (0, 200, 255, 220)      # amber outline (Nemesis ghost markers)
 
 
 class DeploymentState(Enum):
@@ -75,30 +133,68 @@ class DeploymentState(Enum):
 
 @dataclass
 class ModelDeploymentStatus:
-    """Tracks the deployment state of a single model/unit entry.
+    """Tracks the deployment state of a single army entry (model or unit).
+
+    A unit entry has one physical model per registered QR code; all
+    per-model lists below (``base_sizes_mm``, ``positions``, ``valid``) are
+    parallel to :attr:`qr_codes`.
 
     Attributes:
         card: The model's stat card.
-        qr_codes: QR code messages assigned to this entry.
-        position_in: Latest position in inches (game coords), or None.
-        in_zone: Whether the model is currently inside its deployment zone.
-        advance_deploy: Whether this model has Advance Deployment.
+        qr_codes: QR code messages assigned to this entry, one per physical
+            model.
+        base_sizes_mm: Base diameter (mm) for each physical model.
+        positions: Latest position in inches (game coords) for each
+            physical model, or ``None`` if not yet detected.
+        valid: Whether each physical model currently satisfies all
+            deployment rules (containment, unit cohesion, no overlap).
+        advance_deploy: Whether this model/unit has Advance Deployment.
     """
 
     card: ModelStatCard
     qr_codes: list[str]
-    position_in: Optional[tuple[float, float]] = None
-    in_zone: bool = False
+    base_sizes_mm: list[int] = field(default_factory=list)
+    positions: list[Optional[tuple[float, float]]] = field(default_factory=list)
+    valid: list[bool] = field(default_factory=list)
     advance_deploy: bool = False
+
+    def __post_init__(self) -> None:
+        n = len(self.qr_codes)
+        if not self.base_sizes_mm:
+            self.base_sizes_mm = [BASE_SIZES[0]] * n
+        if not self.positions:
+            self.positions = [None] * n
+        if not self.valid:
+            self.valid = [False] * n
+
+    @property
+    def in_zone(self) -> bool:
+        """True once every physical model has been placed and is valid."""
+        return bool(self.positions) and all(
+            p is not None for p in self.positions
+        ) and all(self.valid)
+
+    def radius_in(self, index: int) -> float:
+        """Base radius in inches for the physical model at *index*."""
+        mm = (
+            self.base_sizes_mm[index]
+            if index < len(self.base_sizes_mm)
+            else BASE_SIZES[0]
+        )
+        return _mm_to_in(mm) / 2.0
 
 
 class Deployment(QtCore.QObject):
     """AR-assisted deployment phase for two players.
 
     Signals:
-        model_position_updated(int, str, tuple, bool):
-            ``(player_index, model_name, (x_in, y_in), in_zone)`` – a model's
-            position was updated from a QR detection.
+        model_position_updated(int, str, int, object, bool):
+            ``(player_index, model_name, model_index, (x_in, y_in),
+            entry_fully_valid)`` – one physical model's position was updated
+            from a QR detection. ``model_index`` is the index within the
+            entry's physical models (0 for single-model entries).
+            ``entry_fully_valid`` reflects the whole entry's status after
+            recomputing all deployment rules.
         all_placed_changed(int, bool):
             ``(player, all_models_in_zone)`` – the overall placement status
             for a player changed.
@@ -108,7 +204,7 @@ class Deployment(QtCore.QObject):
         status_changed(str): Short status string for the UI.
     """
 
-    model_position_updated = QtCore.Signal(int, str, object, bool)
+    model_position_updated = QtCore.Signal(int, str, int, object, bool)
     all_placed_changed = QtCore.Signal(int, bool)
     phase_completed = QtCore.Signal()
     deployment_cancelled = QtCore.Signal()
@@ -126,13 +222,17 @@ class Deployment(QtCore.QObject):
         qr_codes: list[list[list[str]]],
         sides: dict[int, str],
         first_player: int,
-        deployment_depth_in: float,
+        first_player_depth_in: float,
+        second_player_depth_in: float,
         zone: Zone,
         event_manager: GameEventManager,
         game_log: GameLog,
         narrator: Any = None,
         narration_engine: Optional[NarrationEngine] = None,
         narration_service: Optional[NarrationService] = None,
+        db: Optional[ModelDatabase] = None,
+        nemesis_player: Optional[int] = None,
+        nemesis_deployment_strategy: Optional[str] = None,
         *,
         parent: Optional[QtCore.QObject] = None,
     ) -> None:
@@ -144,8 +244,15 @@ class Deployment(QtCore.QObject):
         self._service = narration_service
         self._sides = sides
         self._first_player = first_player
-        self._deployment_depth = deployment_depth_in
+        self._first_depth = first_player_depth_in
+        self._second_depth = second_player_depth_in
         self._zone = zone
+        self._nemesis_player = nemesis_player
+        self._nemesis_strategy_name = nemesis_deployment_strategy
+        # Suggested ("ghost") positions for Nemesis's models, keyed by
+        # player index: one list of (x, y) per physical model, parallel to
+        # that player's statuses/positions.
+        self._suggested_positions: dict[int, list[list[tuple[float, float]]]] = {}
 
         self._state: DeploymentState = DeploymentState.IDLE
         self._current_player: int = first_player
@@ -162,21 +269,24 @@ class Deployment(QtCore.QObject):
                     else []
                 )
                 advance = ModelAdvantage.ADVANCE_DEPLOYMENT in card.advantages
+                base_sizes = _resolve_base_sizes_mm(card, db, len(codes))
                 player_statuses.append(
                     ModelDeploymentStatus(
                         card=card,
                         qr_codes=list(codes),
+                        base_sizes_mm=base_sizes,
                         advance_deploy=advance,
                     )
                 )
             self._statuses.append(player_statuses)
 
-        # Build a QR-code → (player, model_index) lookup for fast detection matching.
-        self._qr_lookup: dict[str, tuple[int, int]] = {}
+        # Build a QR-code → (player, model_index, physical_index) lookup for
+        # fast detection matching.
+        self._qr_lookup: dict[str, tuple[int, int, int]] = {}
         for p_idx, player_statuses in enumerate(self._statuses):
             for m_idx, status in enumerate(player_statuses):
-                for code in status.qr_codes:
-                    self._qr_lookup[code] = (p_idx, m_idx)
+                for code_idx, code in enumerate(status.qr_codes):
+                    self._qr_lookup[code] = (p_idx, m_idx, code_idx)
 
         # Overlay cache.
         self._overlay_cache: Optional[np.ndarray] = None
@@ -263,64 +373,128 @@ class Deployment(QtCore.QObject):
     # Zone geometry
     # ------------------------------------------------------------------
 
-    def _zone_rect_in(self, player: int) -> tuple[float, float, float, float]:
+    def _depth_for(self, player: int) -> float:
+        """Return the base deployment zone depth (inches) for *player*.
+
+        The player who deploys first uses ``first_player_depth_in``; the
+        other player uses ``second_player_depth_in`` (typically deeper, to
+        compensate for going second).
+        """
+        return (
+            self._first_depth
+            if player == self._first_player
+            else self._second_depth
+        )
+
+    def _zone_rect_in(
+        self, player: int, extra_depth: float = 0.0
+    ) -> tuple[float, float, float, float]:
         """Return (x_min, y_min, x_max, y_max) in inches for *player*'s zone.
 
         The rectangle spans the full board height.  Depth (from the player's
-        board edge) is the base deployment depth; per-model Advance Deployment
-        bonus is handled in :meth:`_is_in_zone`.
+        board edge) is the base deployment depth plus *extra_depth* (used to
+        add the per-model Advance Deployment bonus).
         """
         side = self._sides.get(player, "left")
         board_w = self._zone.width
         board_h = self._zone.height
-        depth = self._deployment_depth
+        depth = self._depth_for(player) + extra_depth
 
         if side == "left":
             return (0.0, 0.0, depth, board_h)
         else:
             return (board_w - depth, 0.0, board_w, board_h)
 
-    def _is_in_zone(self, player: int, status: ModelDeploymentStatus) -> bool:
-        """Check if *status*'s position is inside the player's deployment zone.
+    # ------------------------------------------------------------------
+    # Deployment rule validation
+    # ------------------------------------------------------------------
 
-        Uses per-model depth: ``deployment_depth_in`` + 3" if the model has
-        Advance Deployment.
+    def _recompute_validity(self) -> None:
+        """Recompute per-physical-model validity across both players.
+
+        A physical model's placement is valid only if all three rules hold:
+
+        1. Its base is fully inside its player's deployment zone (no part
+           of the base may be outside), accounting for base size and the
+           Advance Deployment bonus when applicable.
+        2. It is within 3" of every other model in the same unit (unit
+           cohesion). Units of one model automatically satisfy this.
+        3. Its base does not overlap any other placed model's base,
+           anywhere on the table (either player's models).
         """
-        if status.position_in is None:
-            return False
+        # Collect every currently placed physical model: (player, model_idx,
+        # code_idx, x, y, radius_in).
+        placed: list[tuple[int, int, int, float, float, float]] = []
+        for p_idx, player_statuses in enumerate(self._statuses):
+            for m_idx, status in enumerate(player_statuses):
+                for code_idx, pos in enumerate(status.positions):
+                    if pos is None:
+                        continue
+                    x, y = pos
+                    r = status.radius_in(code_idx)
+                    placed.append((p_idx, m_idx, code_idx, x, y, r))
+                    status.valid[code_idx] = True
 
-        x, y = status.position_in
-        side = self._sides.get(player, "left")
-        depth = self._deployment_depth + (
-            _ADVANCE_DEPLOY_BONUS if status.advance_deploy else 0.0
-        )
-        board_w = self._zone.width
-        board_h = self._zone.height
+        # Rule 1: full base containment within the deployment zone.
+        for p_idx, m_idx, code_idx, x, y, r in placed:
+            status = self._statuses[p_idx][m_idx]
+            extra = _ADVANCE_DEPLOY_BONUS if status.advance_deploy else 0.0
+            x_min, y_min, x_max, y_max = self._zone_rect_in(p_idx, extra)
+            if not (
+                x - r >= x_min
+                and x + r <= x_max
+                and y - r >= y_min
+                and y + r <= y_max
+            ):
+                status.valid[code_idx] = False
 
-        # Check board bounds.
-        if not (0.0 <= x <= board_w and 0.0 <= y <= board_h):
-            return False
+        # Rule 2: unit cohesion — every model within 3" of every other model
+        # in the same unit.
+        for player_statuses in self._statuses:
+            for status in player_statuses:
+                placed_idxs = [
+                    i for i, p in enumerate(status.positions) if p is not None
+                ]
+                if len(placed_idxs) < 2:
+                    continue
+                for i in placed_idxs:
+                    ok = all(
+                        i == j
+                        or _distance(status.positions[i], status.positions[j])
+                        <= _UNIT_COHESION_IN
+                        for j in placed_idxs
+                    )
+                    if not ok:
+                        status.valid[i] = False
 
-        if side == "left":
-            return x <= depth
-        else:
-            return x >= (board_w - depth)
+        # Rule 3: no base overlap between any two placed models, anywhere on
+        # the table (across both players).
+        for a in range(len(placed)):
+            pa, ma, ca, xa, ya, ra = placed[a]
+            for b in range(a + 1, len(placed)):
+                pb, mb, cb, xb, yb, rb = placed[b]
+                if _distance((xa, ya), (xb, yb)) < (ra + rb):
+                    self._statuses[pa][ma].valid[ca] = False
+                    self._statuses[pb][mb].valid[cb] = False
+
+        self._overlay_dirty = True
 
     # ------------------------------------------------------------------
     # Detection handling
     # ------------------------------------------------------------------
 
     def _on_detection(self, detections: list, zone_name: str) -> None:
-        """Process QR detections: update positions and zone validity."""
+        """Process QR detections: update per-model positions and validity."""
         if not self._active:
             return
 
+        updated: list[tuple[int, int, int]] = []
         for det in detections:
             msg = (getattr(det, "message", "") or "").strip()
             if not msg or msg not in self._qr_lookup:
                 continue
 
-            p_idx, m_idx = self._qr_lookup[msg]
+            p_idx, m_idx, code_idx = self._qr_lookup[msg]
             status = self._statuses[p_idx][m_idx]
 
             # Compute center from bounds (x, y, w, h).
@@ -350,18 +524,23 @@ class Deployment(QtCore.QObject):
             x_in = game_px[0] / res
             y_in = game_px[1] / res
 
-            # For multi-code units, aggregate: store the latest position
-            # and check all sub-codes are in-zone.  For simplicity (v1),
-            # we update position_in to the latest detected code's position
-            # and re-check in_zone.  A model is in_zone only if all its
-            # codes have been seen and are within the rectangle.
-            status.position_in = (x_in, y_in)
-            status.in_zone = self._is_in_zone(p_idx, status)
+            status.positions[code_idx] = (x_in, y_in)
+            updated.append((p_idx, m_idx, code_idx))
 
-            self._overlay_dirty = True
-            self.model_position_updated.emit(
-                p_idx, status.card.name, (x_in, y_in), status.in_zone
-            )
+        if updated:
+            # Validity depends on every other placed model (cohesion and
+            # overlap are cross-model), so recompute once per batch rather
+            # than incrementally per detection.
+            self._recompute_validity()
+            for p_idx, m_idx, code_idx in updated:
+                status = self._statuses[p_idx][m_idx]
+                self.model_position_updated.emit(
+                    p_idx,
+                    status.card.name,
+                    code_idx,
+                    status.positions[code_idx],
+                    status.in_zone,
+                )
 
         # Check all-placed status for current player.
         self._check_all_placed(self._current_player)
@@ -478,8 +657,9 @@ class Deployment(QtCore.QObject):
         player_label = f"Player {player + 1}"
         side = self._sides.get(player, "left")
         side_label = "left" if side == "left" else "right"
-        depth = self._deployment_depth
+        depth = self._depth_for(player)
         model_count = len(self._statuses[player])
+        is_nemesis_turn = player == self._nemesis_player
 
         self._say(
             f"{player_label}, deploy your army on the {side_label} edge. "
@@ -500,7 +680,45 @@ class Deployment(QtCore.QObject):
         self.status_changed.emit(
             f"Deployment: {player_label} placing models…"
         )
+
+        if is_nemesis_turn and model_count > 0:
+            self._generate_nemesis_suggestions(player)
+            if self._suggested_positions.get(player):
+                self._say(
+                    "Nemesis has plotted its deployment. Ghost markers on "
+                    "the table show where to place its models.",
+                    use_persona=False,
+                )
+
         self._state = DeploymentState.TRACKING
+
+    def _generate_nemesis_suggestions(self, player: int) -> None:
+        """Compute suggested ("ghost") positions for Nemesis's models.
+
+        Uses the strategy named by ``nemesis_deployment_strategy``. Failure
+        to resolve the strategy silently disables suggestions for this
+        turn -- the player can still freely place Nemesis's models and the
+        real deployment rules are enforced regardless.
+        """
+        self._suggested_positions.pop(player, None)
+        if not self._nemesis_strategy_name:
+            return
+        try:
+            strategy = get_strategy(self._nemesis_strategy_name)
+        except KeyError:
+            self._log.system(
+                f"Unknown Nemesis deployment strategy "
+                f"'{self._nemesis_strategy_name}'; skipping suggestions."
+            )
+            return
+
+        zone_rect = self._zone_rect_in(player)
+        units = [
+            [status.radius_in(i) for i in range(len(status.qr_codes))]
+            for status in self._statuses[player]
+        ]
+        self._suggested_positions[player] = strategy(zone_rect, units)
+        self._overlay_dirty = True
 
     # ------------------------------------------------------------------
     # Projector overlay
@@ -525,7 +743,7 @@ class Deployment(QtCore.QObject):
         # Draw both players' zone rectangles.
         for p_idx in (0, 1):
             side = self._sides.get(p_idx, "left")
-            depth = self._deployment_depth
+            depth = self._depth_for(p_idx)
             depth_px = int(depth * res)
 
             if side == "left":
@@ -546,15 +764,37 @@ class Deployment(QtCore.QObject):
             # Solid border.
             cv2.rectangle(overlay, (x1, y1), (x2, y2), border_color, 2)
 
-        # Draw model position markers.
-        for p_idx, player_statuses in enumerate(self._statuses):
+        # Draw Nemesis's suggested ("ghost") positions for the currently
+        # deploying player, if any were generated for this turn.
+        suggestions = self._suggested_positions.get(self._current_player)
+        if suggestions:
+            for status, unit_positions in zip(
+                self._statuses[self._current_player], suggestions
+            ):
+                for idx, (x, y) in enumerate(unit_positions):
+                    x_px = int(x * res)
+                    y_px = int(y * res)
+                    r_px = max(
+                        _MARKER_RADIUS, int(status.radius_in(idx) * res)
+                    )
+                    cv2.circle(
+                        overlay, (x_px, y_px), r_px, _SUGGESTED_COLOR, 2
+                    )
+
+        # Draw a base-sized marker per physical model, coloured by that
+        # specific model's own rule validity (containment, cohesion, overlap).
+        for player_statuses in self._statuses:
             for status in player_statuses:
-                if status.position_in is None:
-                    continue
-                x_px = int(status.position_in[0] * res)
-                y_px = int(status.position_in[1] * res)
-                color = _MARKER_IN_ZONE if status.in_zone else _MARKER_OUT_ZONE
-                cv2.circle(overlay, (x_px, y_px), _MARKER_RADIUS, color, -1)
+                for idx, pos in enumerate(status.positions):
+                    if pos is None:
+                        continue
+                    x_px = int(pos[0] * res)
+                    y_px = int(pos[1] * res)
+                    r_px = max(_MARKER_RADIUS, int(status.radius_in(idx) * res))
+                    color = (
+                        _MARKER_IN_ZONE if status.valid[idx] else _MARKER_OUT_ZONE
+                    )
+                    cv2.circle(overlay, (x_px, y_px), r_px, color, -1)
 
         self._overlay_cache = overlay
         self._overlay_dirty = False

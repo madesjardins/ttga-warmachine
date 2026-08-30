@@ -39,6 +39,7 @@ if TYPE_CHECKING:
 
     from .event_manager import GameEventManager
     from .game_log import GameLog
+    from .match_settings import MatchSettings
 
 
 # Supported game modes: canonical key -> spoken keywords that select it.
@@ -110,7 +111,9 @@ class SetupFlow(QtCore.QObject):
 
     Signals:
         setup_complete(dict): Emitted with the final config
-            ``{"game_mode": str, "points": int}`` when setup finishes.
+            ``{"game_mode": str, "points": int, "deployment_depth":
+            Optional[float], "match_settings": Optional[MatchSettings]}``
+            when setup finishes.
         setup_cancelled(): Emitted when the player cancels setup.
         narrate(str): Text the narrator should speak aloud.
         status_changed(str): Short status string for the UI.
@@ -149,7 +152,7 @@ class SetupFlow(QtCore.QObject):
         narration_service: Optional[NarrationService] = None,
         *,
         default_points: int = 75,
-        game_mode: Optional[str] = None,
+        match_settings: Optional[MatchSettings] = None,
         parent: Optional[QtCore.QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -159,7 +162,7 @@ class SetupFlow(QtCore.QObject):
         self._narration = narration_engine
         self._service = narration_service
         self._default_points = default_points
-        self._preset_game_mode: Optional[str] = game_mode
+        self._match_settings: Optional[MatchSettings] = match_settings
 
         self._state: SetupState = SetupState.IDLE
         self._game_mode: Optional[str] = None
@@ -187,6 +190,7 @@ class SetupFlow(QtCore.QObject):
             "game_mode": self._game_mode,
             "points": self._points,
             "deployment_depth": self._deployment_depth,
+            "match_settings": self._match_settings,
         }
 
     # ------------------------------------------------------------------
@@ -204,15 +208,24 @@ class SetupFlow(QtCore.QObject):
             self._service_connected = True
         self._event_manager.push_speech_handler(self._on_speech)
 
-        if self._preset_game_mode is not None:
-            # Game mode was selected via the UI combobox; skip to points.
-            self._game_mode = self._preset_game_mode
-            self._state = SetupState.POINTS
+        if self._match_settings is not None:
+            # Match settings were selected via the UI combobox; the points
+            # and deployment depths are fixed by the loaded configuration,
+            # so we skip straight to confirmation.
+            ms = self._match_settings
+            self._game_mode = ms.id
+            self._points = ms.points
+            self._state = SetupState.CONFIRM
             self._say(
-                "Let us prepare for battle. "
-                "What points value shall we use for this match?",
+                f"Let us prepare for battle: {ms.display_name}. "
+                f"Each army will field {ms.points} points. "
+                f"The first player to deploy uses a {ms.first_player_depth_in:.0f} "
+                f"inch deployment zone, and the second player uses a "
+                f"{ms.second_player_depth_in:.0f} inch zone. "
+                "Shall we begin? Say yes to start.",
+                use_persona=False,
             )
-            self.status_changed.emit("Setup: choose points…")
+            self.status_changed.emit("Setup: confirm to begin…")
         else:
             self._state = SetupState.GAME_MODE
             self._game_mode = None
@@ -488,25 +501,24 @@ class SetupFlow(QtCore.QObject):
 
         # Restart and cancel take precedence over a stray affirmative match.
         if is_restart:
+            if self._match_settings is not None:
+                # Points and deployment depths are fixed by the loaded
+                # match settings; nothing to change, just re-confirm.
+                self._say(
+                    "This match's settings are fixed by the loaded "
+                    "configuration. Say yes to begin, or cancel to abort."
+                )
+                return
             self._points = None
             self._deployment_depth = None
-            if self._preset_game_mode is not None:
-                self._game_mode = self._preset_game_mode
-                self._state = SetupState.POINTS
-                self._say(
-                    "Very well, let us start over. "
-                    "What points value shall we use for this match?",
-                )
-                self.status_changed.emit("Setup: choose points…")
-            else:
-                self._state = SetupState.GAME_MODE
-                self._game_mode = None
-                self._say(
-                    "Very well, let us start over. Which game mode shall we play? "
-                    "You can say single match.",
-                    use_persona=False,
-                )
-                self.status_changed.emit("Setup: choose a game mode…")
+            self._state = SetupState.GAME_MODE
+            self._game_mode = None
+            self._say(
+                "Very well, let us start over. Which game mode shall we play? "
+                "You can say single match.",
+                use_persona=False,
+            )
+            self.status_changed.emit("Setup: choose a game mode…")
             return
         if is_cancel:
             self._cancel()
@@ -545,6 +557,7 @@ class SetupFlow(QtCore.QObject):
             "game_mode": self._game_mode,
             "points": self._points,
             "deployment_depth": self._deployment_depth,
+            "match_settings": self._match_settings,
         }
         self._log.system(
             f"Setup complete: mode={self._game_mode}, "

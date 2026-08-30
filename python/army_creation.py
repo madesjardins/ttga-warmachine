@@ -21,11 +21,14 @@ to be used inside a :class:`Match` but can also be invoked standalone.
 
 from __future__ import annotations
 
+import random
 from typing import TYPE_CHECKING, Any, Optional
 
 from PySide6 import QtCore
 
 from ttga.speech_recognition import fuzzy_match_name
+
+from .nemesis_army import build_random_army
 
 if TYPE_CHECKING:
     from ttga.narration_engine import NarrationEngine
@@ -94,6 +97,8 @@ class ArmyCreation(QtCore.QObject):
         narration_engine: Optional[NarrationEngine] = None,
         narration_service: Optional[NarrationService] = None,
         match_threshold: float = 0.7,
+        nemesis_player: Optional[int] = None,
+        points: Optional[int] = None,
         parent: Optional[QtCore.QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -104,6 +109,11 @@ class ArmyCreation(QtCore.QObject):
         self._narration = narration_engine
         self._service = narration_service
         self._match_threshold: float = match_threshold
+        # When set, Nemesis auto-builds its own army instead of the player
+        # choosing it by voice (the player still registers each entry's QR
+        # codes as usual).
+        self._nemesis_player: Optional[int] = nemesis_player
+        self._points: Optional[int] = points
         # Async intent-parsing state (used only when a service is present).
         self._awaiting_intent: bool = False
         self._pending_text: str = ""
@@ -126,6 +136,8 @@ class ArmyCreation(QtCore.QObject):
         self._collected_qr: list[str] = []
         # QR codes already assigned anywhere in the match (prevents reuse).
         self._used_qr: set[str] = set()
+        # Remaining entries to register when Nemesis auto-builds its army.
+        self._nemesis_queue: list[ModelStatCard] = []
 
     # ------------------------------------------------------------------
     # Properties
@@ -171,6 +183,7 @@ class ArmyCreation(QtCore.QObject):
         self._awaiting_intent = False
         self._factions = [None, None]
         self._selecting_faction = False
+        self._nemesis_queue = []
         if self._service is not None:
             self._service.narrated.connect(self._on_narrated)
             self._service.intent_parsed.connect(self._on_intent_parsed)
@@ -238,7 +251,14 @@ class ArmyCreation(QtCore.QObject):
     # ------------------------------------------------------------------
 
     def _begin_faction_selection(self) -> None:
-        """Ask the current player to choose their faction."""
+        """Ask the current player to choose their faction.
+
+        If Nemesis is auto-building its own army, it also picks its own
+        faction instead of the player choosing it by voice.
+        """
+        if self._current_player == self._nemesis_player:
+            self._auto_select_nemesis_faction()
+            return
         self._selecting_faction = True
         player_label = f"Player {self._current_player + 1}"
         self._say(
@@ -247,6 +267,31 @@ class ArmyCreation(QtCore.QObject):
             use_persona=False,
         )
         self.status_changed.emit(f"Waiting for {player_label} faction…")
+
+    def _auto_select_nemesis_faction(self) -> None:
+        """Have Nemesis pick a faction with at least one available model."""
+        factions = self._all_faction_names()
+        playable = [
+            f for f in factions if self._db.models_by_faction(f, include_mercenaries=False)
+        ]
+        choices = playable or factions
+        if not choices:
+            self._say(
+                "Nemesis could not find any faction in the database. "
+                "Its army will be empty.",
+                use_persona=False,
+            )
+            self._factions[self._current_player] = None
+            self._on_army_completed()
+            return
+
+        faction = random.choice(choices)
+        self._factions[self._current_player] = faction
+        self._say(
+            f"Nemesis has chosen to fight as {faction}.", use_persona=False
+        )
+        self.faction_selected.emit(self._current_player, faction)
+        self._auto_build_nemesis_army(faction)
 
     def _all_faction_names(self) -> list[str]:
         """Return all faction names from the Faction enum."""
@@ -287,6 +332,60 @@ class ArmyCreation(QtCore.QObject):
             )
         self._say(text, use_persona=False)
         self.status_changed.emit(f"Waiting for {player_label}…")
+
+    # ------------------------------------------------------------------
+    # Nemesis auto-build
+    # ------------------------------------------------------------------
+
+    def _auto_build_nemesis_army(self, faction: str) -> None:
+        """Randomly assemble Nemesis's army, then register it entry by entry.
+
+        The player still has to physically present each entry's QR code(s),
+        exactly as for a player-chosen army.
+        """
+        player_label = f"Player {self._current_player + 1}"
+        points = self._points or 0
+        army = build_random_army(self._db, faction, points)
+        if not army:
+            self._say(
+                f"Nemesis could not find any affordable {faction} entries "
+                f"within {points} points. Its army will be empty.",
+                use_persona=False,
+            )
+            self._on_army_completed()
+            return
+
+        total = sum(card.cost for card in army)
+        names = ", ".join(card.name for card in army)
+        self._say(
+            f"Nemesis has assembled a {total}-point {faction} force: "
+            f"{names}. Please present the QR codes to register each entry, "
+            "one at a time.",
+            use_persona=False,
+        )
+        self.status_changed.emit(f"{player_label}: registering Nemesis's army…")
+        self._nemesis_queue = list(army)
+        self._begin_next_nemesis_registration()
+
+    def _begin_next_nemesis_registration(self) -> None:
+        """Start QR registration for the next queued Nemesis entry."""
+        if not self._nemesis_queue:
+            self._on_army_completed()
+            return
+        card = self._nemesis_queue.pop(0)
+        self._begin_qr_collection(card)
+
+    def _after_qr_registration_step(self) -> None:
+        """Continue after one entry's QR registration finishes or is cancelled.
+
+        Moves on to the next queued Nemesis entry when auto-building (only
+        ever true for the player Nemesis auto-builds for), or prompts the
+        player for the next model/unit otherwise.
+        """
+        if self._current_player == self._nemesis_player:
+            self._begin_next_nemesis_registration()
+        else:
+            self._prompt_next_model()
 
     # ------------------------------------------------------------------
     # Speech handler
@@ -525,7 +624,7 @@ class ArmyCreation(QtCore.QObject):
             f"QR {'code' if n == 1 else 'codes'}."
         )
 
-        QtCore.QTimer.singleShot(500, self._prompt_next_model)
+        QtCore.QTimer.singleShot(500, self._after_qr_registration_step)
 
     def _cancel_qr_collection(self) -> None:
         """Remove the in-progress model/unit without registering it."""
@@ -547,7 +646,7 @@ class ArmyCreation(QtCore.QObject):
 
         name = card.name if card is not None else "the model"
         self._say(f"Cancelled adding {name}.")
-        QtCore.QTimer.singleShot(500, self._prompt_next_model)
+        QtCore.QTimer.singleShot(500, self._after_qr_registration_step)
 
     # ------------------------------------------------------------------
     # Army completed

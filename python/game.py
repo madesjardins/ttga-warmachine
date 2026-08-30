@@ -39,6 +39,7 @@ from ttga.qr_detection import QRDetector
 
 from .event_manager import GameEventManager
 from .match import Match, MatchPhase
+from .match_settings import load_match_settings
 from .model_database import ModelDatabase
 from .model_editor_dialog import ModelEditorDialog
 from .model_stat_card import BasicType, ModelStatCard
@@ -46,6 +47,7 @@ from .persona import WARMACHINE_PERSONA
 from .setup_flow import SetupState
 
 _MODELS_DB_DIR = Path(__file__).parent.parent / "models_db"
+_MATCH_SETTINGS_DIR = Path(__file__).parent.parent / "match_settings"
 _MAX_LOG_DISPLAY_LINES = 100
 
 _SORT_OPTIONS: list[tuple[str, Optional[Callable]]] = [
@@ -105,6 +107,7 @@ class WarmachineDialog(GameDialog):
         self._log_tab_index = self.tabs.addTab(log_tab, "Log")
 
         self._populate_database_combo()
+        self._populate_match_settings_combo()
 
     def _create_main_tab(self) -> QtWidgets.QWidget:
         """Create the main tab with Start/Stop game buttons.
@@ -129,7 +132,6 @@ class WarmachineDialog(GameDialog):
         mode_row = QtWidgets.QHBoxLayout()
         mode_row.addWidget(QtWidgets.QLabel("Game Mode:"))
         self.game_mode_combo = QtWidgets.QComboBox()
-        self.game_mode_combo.addItem("Single Match", "single_match")
         mode_row.addWidget(self.game_mode_combo, stretch=1)
         layout.addLayout(mode_row)
 
@@ -435,7 +437,7 @@ class WarmachineDialog(GameDialog):
             narration_engine=narration_engine,
             narration_service=self._narration_service,
             zone=play_area_zone,
-            game_mode=self.game_mode_combo.currentData(),
+            match_settings=self.game_mode_combo.currentData(),
             match_threshold=getattr(core, "speech_threshold", 0.7),
             parent=self,
         )
@@ -708,8 +710,17 @@ class WarmachineDialog(GameDialog):
         self.ingame_status_label.setText(text)
 
     # ------------------------------------------------------------------
-    # Database combo helpers
+    # Combo helpers
     # ------------------------------------------------------------------
+
+    def _populate_match_settings_combo(self) -> None:
+        """Scan the match_settings folder and populate the Game Mode combo."""
+        self.game_mode_combo.blockSignals(True)
+        self.game_mode_combo.clear()
+        for ms in load_match_settings(_MATCH_SETTINGS_DIR):
+            self.game_mode_combo.addItem(ms.display_name, ms)
+        self.game_mode_combo.blockSignals(False)
+        self.game_mode_combo.setCurrentIndex(0)
 
     def _populate_database_combo(self) -> None:
         """Scan the models_db folder and populate the database combo."""
@@ -1191,13 +1202,19 @@ class Game(GameBase):
                     "game_mode": "Say 'single match' to choose a single-game format.",
                     "points": "Say a number like '50 points' to set the army point value.",
                     "deployment_depth": "Say a number like '7 inches' to set the deployment zone depth, or accept the default of 7.",
+                    "confirm": "The points and deployment depths come from the selected Game Mode preset. Say 'yes' to begin, or 'cancel' to abort.",
                     "cancel": "Say 'cancel' to abort the setup.",
                     "repeat": "Say 'repeat' to hear the last prompt again.",
                 }
+                current_options = (
+                    ["yes", "cancel", "repeat"]
+                    if state_name == "confirm"
+                    else ["single match", "cancel", "repeat"]
+                )
                 return {
                     "state": f"setup_{state_name}",
                     "summary": summaries.get(state_name, "The player is in the setup flow."),
-                    "current_options": ["single match", "cancel", "repeat"],
+                    "current_options": current_options,
                     "topics": topics,
                 }
             return {

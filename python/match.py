@@ -29,6 +29,7 @@ from PySide6 import QtCore
 from .army_creation import ArmyCreation
 from .deployment import Deployment
 from .game_log import GameLog
+from .match_settings import NEMESIS_PLAYER_INDEX
 from .roll_off import RollOff
 from .setup_flow import SetupFlow
 
@@ -38,6 +39,7 @@ if TYPE_CHECKING:
     from ttga.zone import Zone
 
     from .event_manager import GameEventManager
+    from .match_settings import MatchSettings
     from .model_database import ModelDatabase
 
 
@@ -71,7 +73,7 @@ class Match(QtCore.QObject):
         narration_service: Optional[NarrationService] = None,
         zone: Optional[Zone] = None,
         *,
-        game_mode: Optional[str] = None,
+        match_settings: Optional[MatchSettings] = None,
         match_threshold: float = 0.7,
         parent: Optional[QtCore.QObject] = None,
     ) -> None:
@@ -82,7 +84,7 @@ class Match(QtCore.QObject):
         self._narration = narration_engine
         self._service = narration_service
         self._zone = zone
-        self._game_mode = game_mode
+        self._match_settings = match_settings
         self._match_threshold: float = match_threshold
         self._phase: Optional[MatchPhase] = None
         self._log = GameLog(parent=self)
@@ -167,7 +169,7 @@ class Match(QtCore.QObject):
             narrator=self._narrator,
             narration_engine=self._narration,
             narration_service=self._service,
-            game_mode=self._game_mode,
+            match_settings=self._match_settings,
             parent=self,
         )
         self._setup_flow.setup_complete.connect(self._on_setup_complete)
@@ -191,6 +193,15 @@ class Match(QtCore.QObject):
 
     def _begin_army_creation(self) -> None:
         self._phase = MatchPhase.ARMY_CREATION
+        nemesis_player = (
+            NEMESIS_PLAYER_INDEX
+            if self._match_settings is not None
+            and self._match_settings.nemesis_chooses_army
+            else None
+        )
+        points = (
+            self._match_settings.points if self._match_settings is not None else None
+        )
         self._army_creation = ArmyCreation(
             db=self._db,
             event_manager=self._event_manager,
@@ -199,6 +210,8 @@ class Match(QtCore.QObject):
             narration_engine=self._narration,
             narration_service=self._service,
             match_threshold=self._match_threshold,
+            nemesis_player=nemesis_player,
+            points=points,
             parent=self,
         )
         self._army_creation.phase_completed.connect(
@@ -246,18 +259,39 @@ class Match(QtCore.QObject):
 
     def _begin_deployment(self) -> None:
         self._phase = MatchPhase.DEPLOYMENT
+        if self._match_settings is not None:
+            first_depth = self._match_settings.first_player_depth_in
+            second_depth = self._match_settings.second_player_depth_in
+        else:
+            first_depth = self._config.get("deployment_depth", 7.0)
+            second_depth = first_depth
+        nemesis_player = (
+            NEMESIS_PLAYER_INDEX
+            if self._match_settings is not None
+            and self._match_settings.nemesis_chooses_deployment
+            else None
+        )
+        nemesis_strategy = (
+            self._match_settings.nemesis_deployment_strategy
+            if self._match_settings is not None
+            else None
+        )
         self._deployment = Deployment(
             armies=self._army_creation.armies,
             qr_codes=self._army_creation.qr_codes,
             sides=self._roll_off_result["sides"],
             first_player=self._roll_off_result["first_player"],
-            deployment_depth_in=self._config.get("deployment_depth", 7.0),
+            first_player_depth_in=first_depth,
+            second_player_depth_in=second_depth,
             zone=self._zone,
             event_manager=self._event_manager,
             game_log=self._log,
             narrator=self._narrator,
             narration_engine=self._narration,
             narration_service=self._service,
+            db=self._db,
+            nemesis_player=nemesis_player,
+            nemesis_deployment_strategy=nemesis_strategy,
             parent=self,
         )
         self._deployment.phase_completed.connect(self._on_deployment_done)
