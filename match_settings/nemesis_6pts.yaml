@@ -1,16 +1,16 @@
-# Simple 10-point match where Nemesis (the CPU opponent) picks its own
+# Simple 6-point match where Nemesis (the CPU opponent) picks its own
 # army and its own deployment positions. The player still physically
 # places Nemesis's models and registers their QR codes.
 
-id: nemesis_10pts
-display_name: "Nemesis Controlled - 10 pts"
-points: 10
+id: nemesis_6pts
+display_name: "Nemesis Controlled - 6 pts"
+points: 6
 
 deployment:
   first_player_depth_in: 7.0
   second_player_depth_in: 10.0
 
 nemesis:
-  chooses_army: true
+  chooses_army: false
   chooses_deployment: true
   deployment_strategy: random

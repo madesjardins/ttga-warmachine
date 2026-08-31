@@ -610,7 +610,8 @@ class WarmachineDialog(GameDialog):
 
     @QtCore.Slot()
     def _on_deployment_position_updated(
-        self, player: int, model_name: str, position: object, in_zone: bool
+        self, player: int, model_name: str, model_index: int,
+        position: object, in_zone: bool,
     ) -> None:
         """Update the deployment checklist when a model position changes."""
         if self._deployment_page_index <= 0:

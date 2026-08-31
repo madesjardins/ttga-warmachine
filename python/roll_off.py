@@ -121,6 +121,7 @@ class RollOff(QtCore.QObject):
         self._winner: Optional[int] = None
         self._first_player: Optional[int] = None
         self._sides: dict[int, str] = {}
+        self._side_chooser: Optional[int] = None
         # Async intent-parsing state (used only when a service is present).
         self._awaiting_intent: bool = False
         self._pending_text: str = ""
@@ -148,6 +149,7 @@ class RollOff(QtCore.QObject):
         self._winner = None
         self._first_player = None
         self._sides = {}
+        self._side_chooser = None
         self._awaiting_intent = False
         if self._service is not None:
             self._service.narrated.connect(self._on_narrated)
@@ -398,6 +400,7 @@ class RollOff(QtCore.QObject):
         if chose_side and not chose_turn:
             # Winner picks a side; loser gets first turn.
             self._first_player = loser
+            self._side_chooser = winner
             self._state = RollOffState.CHOICE_SIDE
             self._say(
                 f"Player {winner + 1}, which side of the table do you prefer? "
@@ -429,8 +432,8 @@ class RollOff(QtCore.QObject):
             return
 
         lower = text.strip().lower()
-        winner = self._winner
-        loser = 1 if winner == 0 else 0
+        chooser = self._side_chooser
+        other = 1 if chooser == 0 else 0
 
         chose_left = intent == "choose_side_left" or any(
             kw in lower for kw in _LEFT_KEYWORDS
@@ -440,11 +443,11 @@ class RollOff(QtCore.QObject):
         )
 
         if chose_left and not chose_right:
-            self._sides[winner] = "left"
-            self._sides[loser] = "right"
+            self._sides[chooser] = "left"
+            self._sides[other] = "right"
         elif chose_right and not chose_left:
-            self._sides[winner] = "right"
-            self._sides[loser] = "left"
+            self._sides[chooser] = "right"
+            self._sides[other] = "left"
         else:
             self._say("Please say 'left' or 'right'.")
             return
@@ -482,6 +485,7 @@ class RollOff(QtCore.QObject):
             self._first_player = loser
 
         # Loser picks a side.
+        self._side_chooser = loser
         self._state = RollOffState.CHOICE_SIDE
         self._say(
             f"Player {loser + 1}, which side of the table do you prefer? "

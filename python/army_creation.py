@@ -271,9 +271,16 @@ class ArmyCreation(QtCore.QObject):
     def _auto_select_nemesis_faction(self) -> None:
         """Have Nemesis pick a faction with at least one available model."""
         factions = self._all_faction_names()
+        # Nemesis cannot choose the same faction as the human player.
+        other_faction = self._factions[0] if self._current_player == 1 else self._factions[1]
         playable = [
-            f for f in factions if self._db.models_by_faction(f, include_mercenaries=False)
+            f for f in factions
+            if f != other_faction
+            and self._db.models_by_faction(f, include_mercenaries=False)
         ]
+        if not playable and other_faction is not None:
+            # Fall back to all factions except the other player's, even if empty.
+            playable = [f for f in factions if f != other_faction]
         choices = playable or factions
         if not choices:
             self._say(
