@@ -331,7 +331,7 @@ class ArmyCreation(QtCore.QObject):
         if has_models:
             text = (
                 f"{player_label}, speak the name of the next model or unit, "
-                "or say 'army completed' when the army is completed."
+                "or say 'army completed'."
             )
         else:
             text = (
@@ -678,6 +678,7 @@ class ArmyCreation(QtCore.QObject):
             )
             self._active = False
             self._event_manager.pop_speech_handler(self._on_speech)
+            self._disconnect_service()
             self.phase_completed.emit()
 
     # ------------------------------------------------------------------

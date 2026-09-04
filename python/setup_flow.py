@@ -211,21 +211,20 @@ class SetupFlow(QtCore.QObject):
         if self._match_settings is not None:
             # Match settings were selected via the UI combobox; the points
             # and deployment depths are fixed by the loaded configuration,
-            # so we skip straight to confirmation.
+            # so we announce them and proceed directly without asking for
+            # confirmation.
             ms = self._match_settings
             self._game_mode = ms.id
             self._points = ms.points
-            self._state = SetupState.CONFIRM
             self._say(
                 f"Let us prepare for battle: {ms.display_name}. "
                 f"Each army will field {ms.points} points. "
                 f"The first player to deploy uses a {ms.first_player_depth_in:.0f} "
                 f"inch deployment zone, and the second player uses a "
-                f"{ms.second_player_depth_in:.0f} inch zone. "
-                "Shall we begin? Say yes to start.",
+                f"{ms.second_player_depth_in:.0f} inch zone.",
                 use_persona=False,
             )
-            self.status_changed.emit("Setup: confirm to begin…")
+            self._finish()
         else:
             self._state = SetupState.GAME_MODE
             self._game_mode = None

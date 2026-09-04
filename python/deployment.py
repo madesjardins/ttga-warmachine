@@ -463,8 +463,11 @@ class Deployment(QtCore.QObject):
             ):
                 status.valid[code_idx] = False
 
-        # Rule 2: unit cohesion — every model within 3" of every other model
-        # in the same unit.
+        # Rule 2: unit cohesion — every model must be connected to every
+        # other model in the unit via a chain of models each within 3" of
+        # the next (not necessarily directly within 3" of each other).
+        # The 3" is measured base edge-to-edge, so the threshold is
+        # 3" plus both models' base radii.
         for player_statuses in self._statuses:
             for status in player_statuses:
                 placed_idxs = [
@@ -472,14 +475,33 @@ class Deployment(QtCore.QObject):
                 ]
                 if len(placed_idxs) < 2:
                     continue
+                # Build adjacency among placed models within cohesion range.
+                neighbors: dict[int, set[int]] = {i: set() for i in placed_idxs}
+                for a in placed_idxs:
+                    for b in placed_idxs:
+                        threshold = (
+                            _UNIT_COHESION_IN
+                            + status.radius_in(a)
+                            + status.radius_in(b)
+                        )
+                        if a != b and _distance(
+                            status.positions[a], status.positions[b]
+                        ) <= threshold:
+                            neighbors[a].add(b)
+
+                # BFS from the first model to find the connected component.
+                start = placed_idxs[0]
+                visited = {start}
+                queue = [start]
+                while queue:
+                    cur = queue.pop()
+                    for nxt in neighbors[cur]:
+                        if nxt not in visited:
+                            visited.add(nxt)
+                            queue.append(nxt)
+
                 for i in placed_idxs:
-                    ok = all(
-                        i == j
-                        or _distance(status.positions[i], status.positions[j])
-                        <= _UNIT_COHESION_IN
-                        for j in placed_idxs
-                    )
-                    if not ok:
+                    if i not in visited:
                         status.valid[i] = False
 
         # Rule 3: no base overlap between any two placed models, anywhere on
@@ -493,6 +515,98 @@ class Deployment(QtCore.QObject):
                     self._statuses[pb][mb].valid[cb] = False
 
         self._overlay_dirty = True
+
+    def _diagnose_not_in_zone(
+        self, player: int, entries: list[ModelDeploymentStatus]
+    ) -> list[tuple[str, str]]:
+        """Determine why each *entries* status is not fully in-zone.
+
+        Prints detailed per-model diagnostics to the terminal and returns
+        ``(entry_name, human_readable_reason)`` pairs suitable for
+        narration.
+        """
+        statuses = self._statuses[player]
+
+        # Gather all placed models across both players for overlap checks:
+        # (player_idx, model_idx, code_idx, name, x, y, radius).
+        all_placed: list[tuple[int, int, int, str, float, float, float]] = []
+        for p_idx, player_statuses in enumerate(self._statuses):
+            for m_idx, status in enumerate(player_statuses):
+                for idx, pos in enumerate(status.positions):
+                    if pos is None:
+                        continue
+                    all_placed.append(
+                        (p_idx, m_idx, idx, status.card.name, pos[0], pos[1], status.radius_in(idx))
+                    )
+
+        results: list[tuple[str, str]] = []
+        for s in entries:
+            s_m_idx = statuses.index(s)
+            extra = _ADVANCE_DEPLOY_BONUS if s.advance_deploy else 0.0
+            ax_min, ay_min, ax_max, ay_max = self._zone_rect_in(player, extra)
+            print(f"[Deployment]  Entry: {s.card.name!r} (advance_deploy={s.advance_deploy})")
+
+            reasons: set[str] = set()
+            placed_idxs = [i for i, p in enumerate(s.positions) if p is not None]
+
+            # Unit cohesion connectivity (edge-to-edge distance).
+            neighbors: dict[int, set[int]] = {i: set() for i in placed_idxs}
+            for a in placed_idxs:
+                for b in placed_idxs:
+                    if a == b:
+                        continue
+                    threshold = _UNIT_COHESION_IN + s.radius_in(a) + s.radius_in(b)
+                    if _distance(s.positions[a], s.positions[b]) <= threshold:
+                        neighbors[a].add(b)
+            connected: set[int] = set()
+            if placed_idxs:
+                start = placed_idxs[0]
+                connected = {start}
+                queue = [start]
+                while queue:
+                    cur = queue.pop()
+                    for nxt in neighbors[cur]:
+                        if nxt not in connected:
+                            connected.add(nxt)
+                            queue.append(nxt)
+
+            for idx, pos in enumerate(s.positions):
+                r = s.radius_in(idx)
+                qr = s.qr_codes[idx] if idx < len(s.qr_codes) else "?"
+                if pos is None:
+                    reasons.add("waiting for QR detection")
+                    print(f"[Deployment]    [{idx}] qr={qr!r} NOT DETECTED")
+                    continue
+                x, y = pos
+                contains = (
+                    x - r >= ax_min and x + r <= ax_max
+                    and y - r >= ay_min and y + r <= ay_max
+                )
+                if not contains:
+                    reasons.add("outside the deployment zone")
+                cohesion_ok = idx in connected
+                if not cohesion_ok:
+                    reasons.add("not within 3 inches (base edge to base edge) of the rest of the unit")
+                overlaps = [
+                    (name, p_idx, oidx, round(_distance((x, y), (ox, oy)), 2), round(r + orad, 2))
+                    for p_idx, m_idx, oidx, name, ox, oy, orad in all_placed
+                    if not (p_idx == player and m_idx == s_m_idx and oidx == idx)
+                    and _distance((x, y), (ox, oy)) < (r + orad)
+                ]
+                if overlaps:
+                    reasons.add("overlapping another model's base")
+                print(
+                    f"[Deployment]    [{idx}] qr={qr!r} pos=({x:.2f}, {y:.2f}) "
+                    f"r={r:.2f} valid={s.valid[idx]} "
+                    f"containment_ok={contains} "
+                    f"(zone x=[{ax_min:.2f},{ax_max:.2f}] y=[{ay_min:.2f},{ay_max:.2f}]) "
+                    f"cohesion_ok={cohesion_ok} overlaps={overlaps}"
+                )
+
+            reason_str = ", ".join(sorted(reasons)) if reasons else "unknown reason"
+            results.append((s.card.name, reason_str))
+
+        return results
 
     # ------------------------------------------------------------------
     # Detection handling
@@ -659,10 +773,11 @@ class Deployment(QtCore.QObject):
         ]
 
         if not_placed:
-            names = ", ".join(s.card.name for s in not_placed)
+            reasons = self._diagnose_not_in_zone(self._current_player, not_placed)
+            detail = "; ".join(f"{name} — {reason}" for name, reason in reasons)
             self._say(
-                f"The following models are not yet placed in the deployment "
-                f"zone: {names}. Please place them before completing.",
+                f"The following are not ready: {detail}. "
+                "Please fix them before completing.",
             )
             return
 
